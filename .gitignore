@@ -36,9 +36,6 @@ lightning_logs/
 runs/
 outputs/
 
-# Locally downloaded reference papers; retain reading notes and source links instead.
-docs/paper/*.pdf
-
 # Historical upstream evaluation results; the vendored LLaVA source does not use them.
 third_party/llava/llava/eval/table/results/
 
