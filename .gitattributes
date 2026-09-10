@@ -1,0 +1,2 @@
+# Preserve reference documents byte-for-byte and avoid text diff/whitespace checks.
+*.pdf binary
