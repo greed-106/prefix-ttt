@@ -1,8 +1,8 @@
-# Prefix-TTT H100 容器主账本
+# Prefix-TTT H100 主机主账本
 
-本目录 `docs/experiments/2026-09-10-prefix-ttt-h100/` 是本项目在**本容器**（用户 `mjyang`，8×H100 80GB）的稳定实验目录，启动日期 2026-09-10。本容器的后续记录持续写入本账本，不按自然日另建目录。
+本目录 `docs/experiments/2026-09-10-prefix-ttt-h100/` 是本项目在**本机 `cucloud-server3`**（用户 `mjyang`，8×H100 80GB，裸金属主机）的稳定实验目录，启动日期 2026-09-10。本机的后续记录持续写入本账本，不按自然日另建目录。
 
-前一阶段记录位于 `docs/experiments/2026-09-09-prefix-ttt/`，对应**另一个容器**（用户 `ymj`，四张 A40 48GB，路径 `/data/ymj/code/llm/prefix-ttt`）。那份账本保持原样作为历史，不追加本容器内容；2026-09-10 迁移时已将本机环境审计从旧目录移至本目录 `environment.lock.json`，旧目录未被修改。两个容器是各自独立的检出，`data/`、`artifacts/`、`preference/` 不共享。
+前一阶段记录位于 `docs/experiments/2026-09-09-prefix-ttt/`，对应**另一台机器上的早期环境**（用户 `ymj`，四张 A40 48GB，路径 `/data/ymj/code/llm/prefix-ttt`）。那份账本保持原样作为历史，不追加本机内容；2026-09-10 迁移时已将本机环境审计从旧目录移至本目录 `environment.lock.json`，旧目录未被修改。两台机器是各自独立的检出，`data/`、`artifacts/`、`preference/` 不共享。
 
 ## 当前状态
 
@@ -249,3 +249,82 @@
 - 用户决定保留 `docs/experiments/2026-09-09-prefix-ttt/` 全部 736K 历史（含任务书 `plan.md`、旧机证据与旧 `environment.lock.json`）。
 - 仍待决策的残留：`configs/supervisor/jobs.example.json`、`configs/supervisor/supervisord.conf`、`configs/systemd/prefix-ttt-queue.service.example` 仍含 `/data/ymj` 路径，且 `supervisord.conf` 指向已删除的 `configs/jobs-e2-resume.json`（现已失效）。
 - 多机限制记录：现有 SQLite 调度器只做单机 GPU 分配（本地 `gpu_ids` + 本地队列库），**不支持跨主机调度**；双机运行需要手动跨机 `torchrun`，或先扩展调度器。
+
+## 2026-09-10 多机 NCCL/RDMA 验证与多机训练支持（代码改动，未提交）
+
+- 两节点环境：`cucloud-server3`（172.18.1.184，本机）与 `cucloud-server1`（172.18.1.156，h100-1），各 8×H100 80GB、192 核、2TB 内存；均具备 `mlx5_0..13` 与 `mlx5_bond_0` IB HCA（`PORT_ACTIVE`，InfiniBand link layer），NCCL 2.26.2 与 torch 2.7.1+cu128 完全一致；以太网 RTT 0.7ms。IPoIB 接口（`ibp*`）全部 DOWN，但 NCCL 走 verbs 不需要 IPoIB。
+- 验证一（每节点 1 卡、2 rank）：NCCL 选中 NET/IB，LID 27/51、`subnet-prefix 33022`（同一 IB 子网）；`sum=3.0` 正确；64MiB all-reduce 2.45ms / 2.48ms。
+- 验证二（每节点 8 卡、16 rank）：ranks 0–7 位于 server3、8–15 位于 server1；全部 `sum=136.0`（=16×17/2）正确；64MiB all-reduce **1.677–1.721 ms**（≈40 GB/s 有效带宽）；两端均使用 NET/IB（NCCL 识别 11 个 IB/RoCE 设备）。
+- 已知非阻塞项：日志为 `GDR 0`，即未启用 GPUDirect RDMA；原因是 `nvidia_peermem` 未加载（模块文件存在：`/lib/modules/5.15.0-122-generic/updates/dkms/nvidia-peermem.ko`，版本 570.211.01 与驱动匹配）。数据经主机内存中转但带宽仍有约 40 GB/s，相对 8s 级步时可忽略。有 sudo 时可直接 `modprobe nvidia_peermem` 尝试启用（见后续更正节）。
+- 代码改动（最小化，3 文件 +17/−7）：
+  - `sft.py` 与 `transfer.py`：`dist.init_process_group('nccl', device_id=device)` 显式绑定本 rank 设备；`world > 1` 时打印 `{host, rank, world_size, local_rank, device}`，便于跨机核对 rank→主机映射。
+  - `gpu_communication.py`：同样绑定 `device_id`；输出新增 `host` 与全局 `rank`、并把原字段改为 `local_rank`（原先把 LOCAL_RANK 标为 rank，多机下会误导）。
+- 验证三（用新代码复跑 16 rank）：两端退出码 0；rank→host 映射正确（0–7 cucloud-server3，8–15 cucloud-server1）；sum 全部 136.0；1.68–1.72 ms。
+- CPU 套件：166 passed、17 deselected、0 failed（16.93s）。
+- 多机启动方式（不得使用 `--standalone`）：两台机器分别执行
+  `torchrun --nnodes=2 --nproc_per_node=8 --node_rank=<0|1> --master_addr=172.18.1.184 --master_port=<port> -m prefix_ttt.sft ...`（A 阶段把模块换成 `prefix_ttt.transfer`）。
+- 重要限制（本次未改代码，仅记录）：两机 `/data` 均为本地盘（server3 为 xfs、server1 为 ext4），**没有共享文件系统**；rank 0 的 `--output`、`steps.jsonl`、checkpoint 只会落在 rank 0 所在节点，跨机训练需人工回收/同步，或改用共享存储。
+- h100-1 代码状态：该机 checkout 仍为 `c8501f7`（不含 h100 提交）。本次为跨机验证仅 rsync 了上述 3 个文件到其工作树（`git status` 显示 3 个 M）；正式训练前需让该机取得 `h100` 分支代码。
+- 未做：未提交、未推送（遵循 AGENTS.md 的提交与推送授权规则）。
+
+## 2026-09-10 跨机共享存储方案（宿主机 NFS，待用户配置）
+
+- 需求：两台机器需要一个共同的 checkpoint 落盘位置，避免不同节点各自写本地盘后再人工搬运。
+- 环境事实（已实测）：
+  - 两机 `/data` 均为本地 LVM（server3 xfs、server1 ext4），**不存在现成共享文件系统**；h100-1 上 `/data/shared/weights/prefix-ttt` 原本不存在。
+  - 两台机器都是**裸金属主机**（PID 1 = systemd、`systemd-detect-virt` = none、根文件系统分别是 `/dev/sda4` 与本地 LVM，无容器标记文件）。此前"容器内无法 mount"的判断基于错误前提，已更正，见下节。
+  - `mjyang` 在 server3 上 **sudo 免密可用**（`sudo -n id` → uid=0），在 server1 上 sudo **需要密码**（`sudo -n` 报 password required）。因此 server3 侧的系统级配置可由本智能体直接完成，server1 侧需要用户执行。
+  - `/etc/hosts` 为 root:adm 0644 的普通文件（非独立挂载），有 sudo 即可修改；`nvidia_peermem` 模块存在（`nvidia-peermem.ko` 570.211.01）但未加载，有 sudo 即可 `modprobe`。
+  - 两端 `mjyang` 的 uid/gid 相同（1001/1002，另含 `fastwam` 1003），但**不作为前提**：导出使用 `all_squash,anonuid=1001,anongid=1002`，任何 uid 的客户端都可写；目标目录 owner 为 `mjyang`、setgid 到 `fastwam`。
+  - 两机互访带宽实测 550 MB/s（72.7GB/2m05s）；h100-1 → 本机的 `ssh h100-3`（172.18.1.184）通道亦可用。
+- 选定方案 A：宿主机会话在 server3 导出 `/data/shared/weights/prefix-ttt`，在 server1 挂载到**同一路径**；此后训练零代码改动，`--output` 指向该路径即可，两端看到同一份数据。
+- 注意：该挂载点只用于 checkpoint 与训练日志等大文件；训练数据（34.9 万张图片）继续两端各自本地，避免小文件走 NFS 造成慢速。
+- 待办：server3 侧配置可由本智能体执行，server1 侧需用户执行（sudo 需密码）；配置完成后做跨机写入验证（从 h100-1 写入文件并在 server3 确认可见、核对 uid 与吞吐）。
+
+## 2026-09-10 更正：本机为裸金属主机，不是容器
+
+- 起因：用户质疑"容器内 `/etc/hosts` 不可写"的说法。复查证据：`/proc/1/comm` = `systemd`（而非容器里的 bash/init 替身）、无 `/.dockerenv` 与 `/run/.containerenv`、根文件系统为 `/dev/sda4` ext4（非 overlayfs）、`systemd-detect-virt` = `none`，两端一致。因此**两台机器都是裸金属主机**。
+- 错误来源有两处：① 旧账本（另一台 A40 机器）记录"PID1=bash、user systemd 不可用"，我未加验证就把它当成本机事实沿用；② 更早一次 `sudo` 失败发生在 DSH 文件沙箱仍生效时（沙箱会设置 `no_new_privs`，令 setuid 提权失败），我据此推断"无法提权"，但沙箱解除后 `sudo -n id` 直接返回 uid=0。
+- 更正后的结论：`/etc/hosts` 可用 sudo 修改，NFS 可用 sudo 挂载，`nvidia_peermem` 可用 sudo 加载。此前提出的替代方案——用 `ssh -G` 从 `~/.ssh/config` 解析会合地址、以及"宿主机挂载再传播进容器"——**均无必要**；正确做法是把两台机器的主机名统一写进各自的 `/etc/hosts`，NFS 与 `torchrun --master_addr` 都直接使用主机名，任何命令中都不出现 IP。
+- 本账本中"容器"一词此前多处指代本机，属用词错误；标题与开篇已改为"主机/机器"，其余历史条目保留原文以如实反映当时的判断。
+
+## 2026-09-10 共享存储脚本与别名解析（方案 A 落地，未提交）
+
+- 用户确认采用方案 A（宿主机 NFS），并具备 sudo 权限；要求命令中不再出现 IP、且尽量用户级、从节点可快速配置。
+- 关键实测与决策：
+  - **UID 不必一致**：导出加 `all_squash,anonuid=1001,anongid=1002`，所有客户端写入统一映射为该 uid/gid，从节点无需与其对齐（此前两端 uid 恰好相同只是巧合，不作为前提）。
+  - **别名解析分两层**：宿主机 `/etc/hosts` 里的主机名供 NFS 使用（`/etc/exports` 与 `mount` 命令因此不含 IP）；容器内**无法**解析这些别名——`HOSTALIASES` 实测不生效，容器 `/etc/hosts` 不可写（root 所有），且其中 `cucloud-server3` 映射到 `127.0.1.1`，若用作 `--master_addr` 会绑到回环。
+  - 因此 `--master_addr` 由启动脚本用 `ssh -G <alias>` 从 `~/.ssh/config` 解析：实测 `ssh -G h100-1` → `172.18.1.156`；本机缺少 `h100-3` 自身别名时脚本明确报错，不会静默使用错误地址。
+- 新增脚本（`docs/experiments/2026-09-10-prefix-ttt-h100/scripts/`，已 `bash -n` 检查，未提交）：
+  - `nfs-server-export.sh`：在存储宿主（h100-3）以 sudo 运行；写入 `/etc/hosts` 别名、安装 nfs-kernel-server、以 `all_squash` 导出 `/data/shared/weights/prefix-ttt` 给 `h100-1`。
+  - `nfs-client-setup.sh`：在每个训练节点以 sudo 运行、幂等；写入别名、安装 nfs-common、按别名挂载到同一路径并写探针文件。
+  - `run_multinode.sh`：纯用户级、无需 root；从 `~/.ssh/config` 解析会合地址后调用 `torchrun`，命令中不含 IP。
+- 待用户执行：两台宿主机分别跑上述两个脚本；另需在 server3（本机）的 `~/.ssh/config` 增加 `h100-3` 指向自身的别名，启动脚本才能在本机解析。
+- 未做：未提交、未推送；未在宿主机执行任何 sudo 操作；未挂载任何文件系统。
+
+## 2026-09-10 server3 侧共享存储与 GDR 配置（系统级改动，已执行）
+
+- 经用户授权执行两项：
+  - `sudo bash docs/experiments/2026-09-10-prefix-ttt-h100/scripts/nfs-server-export.sh`：向 `/etc/hosts` 写入两条映射（`172.18.1.184 cucloud-server3 h100-3`、`172.18.1.156 cucloud-server1 h100-1`）；安装 nfs-kernel-server；导出 `/data/shared/weights/prefix-ttt` 给 `cucloud-server1`。`exportfs -v` 实测选项为 `rw,sync,no_subtree_check,all_squash,anonuid=1001,anongid=1002,root_squash,sec=sys`；目录权限 2775。
+  - `sudo modprobe nvidia_peermem`：模块加载成功（`nvidia_peermem 16384 0`，由 `nvidia` 引用）。
+- 验证：
+  - `showmount -e localhost` → `/data/shared/weights/prefix-ttt cucloud-server1`。
+  - NCCL 通道对比（2 节点 × 1 卡，NCCL_DEBUG=INFO）：server3 侧 8 条通道全部为 `NET/IB/11/GDRDMA`；h100-1 侧（未加载 peermem）为 `NET/IB/13`，无 GDRDMA。
+  - 64MiB all-reduce：server3 2.478ms、h100-1 2.461ms；与加载前（2.448/2.480ms）无实质差异——该尺寸下 GDR 不改变时延，主要节省 CPU 与主机内存带宽。
+- 待用户在 h100-1 执行（该机 sudo 需密码）：
+  - `sudo modprobe nvidia_peermem`
+  - `sudo bash /data/mjyang/code/llm/prefix-ttt/docs/experiments/2026-09-10-prefix-ttt-h100/scripts/nfs-client-setup.sh`
+- 未做：未配置模块开机自动加载（`/etc/modules-load.d`）；未做更大消息尺寸的 GDR A/B；未在 h100-1 执行任何 sudo 操作。
+
+## 2026-09-10 客户端脚本增加「同机」与「占用」判定（已实测）
+
+- 结论确认：所有计算节点都是客户端，服务端只提供中心存储；**服务端本机不应挂载自己的导出**，直接用本地目录。理由：同一份数据经本地路径与 NFS 路径两种方式访问会导致属性缓存不一致；本机 NFS 服务重启时硬挂载可能挂住本地进程；且白白绕一圈网络栈。
+- `nfs-client-setup.sh` 改为三分支判定（按优先级）：
+  1. 已是挂载点：读取 `findmnt -no SOURCE --mountpoint`，来源不是 `h100-3:<SHARE>` 则**报错退出**，避免误用别的来源。
+  2. 未挂载但本机在导出该目录（`exportfs -s | grep -F "$SHARE"`）：判定为服务端本机，**跳过挂载**，使用本地目录。
+  3. 未挂载且本机不是导出方：若目标目录已存在且**非空**，**报错退出**（挂载会遮蔽本地数据）；否则按需装 `nfs-common`、建目录、以别名挂载，最后 `findmnt` + 写探针文件自证。
+- 实测（在 server3 上以 sudo 运行）：
+  - 分支 2 命中：输出 `is exported by this host; using the local directory, nothing to mount`，未执行任何挂载；探针写入成功（`.probe-cucloud-server3`）。
+  - 分支 3 的占用保护：用临时目录（内含一个文件）替换 `SHARE` 后运行，脚本以退出码 1 报 `already holds local data; mounting over it would hide that data`，`mountpoint` 确认未挂载、原文件完好。
+  - 分支 1 与正常的客户端挂载路径需在 h100-1 上实测（该机 sudo 需密码）。
+- 未做：未提交、未推送；未在 h100-1 执行任何 sudo 操作。

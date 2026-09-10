@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import random
+import socket
 import time
 
 import numpy as np
@@ -77,7 +78,10 @@ def main():
     torch.cuda.set_device(local_rank)
     device = torch.device('cuda', local_rank)
     if world > 1:
-        dist.init_process_group('nccl')
+        dist.init_process_group('nccl', device_id=device)
+        print(json.dumps({'host': socket.gethostname(), 'rank': rank, 'world_size': world,
+                          'local_rank': local_rank,
+                          'device': torch.cuda.get_device_name(local_rank)}), flush=True)
     try:
         random.seed(42)
         np.random.seed(42)
