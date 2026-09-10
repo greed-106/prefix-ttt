@@ -1,0 +1,47 @@
+# Python environments, bytecode, packaging, and test/static-analysis caches
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+
+# Notebook and editor state
+.ipynb_checkpoints/
+.vscode/
+.idea/
+
+# Local secrets; commit a sanitized example or template if one is added.
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Datasets, reference clones, checkpoints, scheduler state, and experiment outputs
+data/
+preference/
+reference/
+artifacts/
+*.sqlite*
+wandb/
+mlruns/
+lightning_logs/
+runs/
+outputs/
+
+# Locally downloaded reference papers; retain reading notes and source links instead.
+docs/paper/*.pdf
+
+# Historical upstream evaluation results; the vendored LLaVA source does not use them.
+third_party/llava/llava/eval/table/results/
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db

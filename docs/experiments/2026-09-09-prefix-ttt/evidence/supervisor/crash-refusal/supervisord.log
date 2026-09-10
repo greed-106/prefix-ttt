@@ -1,0 +1,10 @@
+2026-09-10 00:50:26,921 INFO RPC interface 'supervisor' initialized
+2026-09-10 00:50:26,921 CRIT Server 'unix_http_server' running without any HTTP authentication checking
+2026-09-10 00:50:26,923 INFO daemonizing the supervisord process
+2026-09-10 00:50:26,923 INFO supervisord started with pid 8498
+2026-09-10 00:50:27,408 INFO spawned: 'queue' with pid 8503
+2026-09-10 00:50:27,408 INFO success: queue entered RUNNING state, process has stayed up for > than 0 seconds (startsecs)
+2026-09-10 00:50:28,112 WARN exited: queue (terminated by SIGKILL; not expected)
+2026-09-10 00:50:28,364 INFO spawned: 'queue' with pid 8520
+2026-09-10 00:50:28,365 INFO success: queue entered RUNNING state, process has stayed up for > than 0 seconds (startsecs)
+2026-09-10 00:50:28,442 WARN exited: queue (exit status 1; not expected)

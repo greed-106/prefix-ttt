@@ -1,0 +1,52 @@
+{
+  "cwd": "/data/ymj/code/llm/prefix-ttt",
+  "env": {
+    "HOME": "/data/ymj",
+    "PATH": "/usr/local/cuda-12.8/bin:/data/ymj/.pixi/bin:/usr/local/bin:/usr/bin:/bin",
+    "CUDA_HOME": "/usr/local/cuda-12.8",
+    "LD_LIBRARY_PATH": "/usr/local/cuda-12.8/lib64",
+    "CPATH": "/data/ymj/code/llm/prefix-ttt/artifacts/gpu/python-dev/usr/include/python3.10:/data/ymj/code/llm/prefix-ttt/artifacts/gpu/python-dev/usr/include",
+    "HF_ENDPOINT": "https://hf-mirror.com",
+    "HF_HOME": "/data/ymj/.cache/huggingface",
+    "HF_HUB_OFFLINE": "1",
+    "HF_DATASETS_OFFLINE": "1",
+    "HF_DATASETS_CACHE": "/data/ymj/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/hf-home/datasets",
+    "LMMS_EVAL_DATASETS_CACHE": "/data/ymj/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/hf-home/datasets",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1"
+  },
+  "jobs": [
+    {
+      "id": "e2-b-resume-5182",
+      "gpu_count": 4,
+      "timeout_seconds": 345600,
+      "argv": [
+        "/data/ymj/.pixi/bin/uv",
+        "run",
+        "--locked",
+        "--no-sync",
+        "python",
+        "-m",
+        "torch.distributed.run",
+        "--standalone",
+        "--nproc_per_node=4",
+        "-m",
+        "prefix_ttt.sft",
+        "--layout",
+        "E2",
+        "--stage-a-checkpoint",
+        "/data/ymj/code/llm/prefix-ttt/artifacts/training/A/latest.pt",
+        "--require-switch-diagnostic",
+        "/data/ymj/code/llm/prefix-ttt/artifacts/training/switch-A/result.json",
+        "--output",
+        "/data/ymj/code/llm/prefix-ttt/artifacts/training/E2",
+        "--save-every",
+        "25",
+        "--resume",
+        "/data/ymj/code/llm/prefix-ttt/artifacts/training/E2/pilot.pt",
+        "--require-pilot-diagnostics",
+        "/data/ymj/code/llm/prefix-ttt/artifacts/training/pilot-diagnostic/E2.json"
+      ]
+    }
+  ]
+}

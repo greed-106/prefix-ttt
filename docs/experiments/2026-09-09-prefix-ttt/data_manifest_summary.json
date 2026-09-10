@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "manifest": "artifacts/cpu/fixed_manifest.json",
+  "manifest_sha256": "246586be1ddd3d0cea09e17047e6d658c5e9a38637654e46906605578707a93b",
+  "counts": {"original": 665298, "valid": 665296, "train": 663248, "dev": 2048, "A": 50000, "excluded": 2, "valid_groups": 389196},
+  "order_sha256": {
+    "train": "0a2bd76a68a05401f4102aa2831dacde6edac745ce3af97add94760f997d1230",
+    "dev": "1298c9eca69d5baeb37edc8c28ae03454bb7caa72c079aeb07940c792e699809",
+    "A": "a63faa4682f8e8beddc47859f0d71af5eb0c398ea10f05384dec2bf911c1c952"
+  },
+  "effective_batch": 128,
+  "A_steps": 391,
+  "full_B_steps": 5182,
+  "full_B_warmup_steps": 156,
+  "pilot_step": 391,
+  "pilot_samples": 50048,
+  "execution": "CPU data audit and manifest only; no A/B training performed"
+}

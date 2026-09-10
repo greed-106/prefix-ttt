@@ -1,0 +1,259 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-09-09T15:01:43.376518+00:00",
+  "platform": "Linux-5.15.0-94-generic-x86_64-with-glibc2.35",
+  "python": "3.10.12 (main, Aug 15 2025, 14:32:43) [GCC 11.4.0]",
+  "executable": "/data/ymj/code/llm/prefix-ttt/.venv/bin/python3",
+  "uv": {
+    "argv": [
+      "/data/ymj/.pixi/envs/uv/bin/uv",
+      "--version"
+    ],
+    "returncode": 0,
+    "stdout": "uv 0.12.10 (x86_64-unknown-linux-gnu)",
+    "stderr": ""
+  },
+  "packages": {
+    "torch": {
+      "version": "2.7.1+cu128",
+      "file": "/data/ymj/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/torch/__init__.py"
+    },
+    "torchvision": {
+      "version": "0.22.1+cu128",
+      "file": "/data/ymj/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/torchvision/__init__.py"
+    },
+    "triton": {
+      "version": "3.3.1",
+      "file": "/data/ymj/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/triton/__init__.py"
+    },
+    "transformers": {
+      "version": "4.51.3",
+      "file": "/data/ymj/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/transformers/__init__.py"
+    },
+    "peft": {
+      "version": "0.15.2",
+      "file": "/data/ymj/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/peft/__init__.py"
+    },
+    "accelerate": {
+      "version": "1.6.0",
+      "file": "/data/ymj/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/accelerate/__init__.py"
+    },
+    "flash-linear-attention": {
+      "version": "0.6.0",
+      "import_error": "RuntimeError: 0 active drivers ([]). There should only be one."
+    },
+    "prefix-ttt": {
+      "version": "0.1.0",
+      "file": "/data/ymj/code/llm/prefix-ttt/src/prefix_ttt/__init__.py"
+    },
+    "tokenizers": {
+      "version": "0.21.4",
+      "file": "/data/ymj/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/tokenizers/__init__.py"
+    },
+    "safetensors": {
+      "version": "0.5.3",
+      "file": "/data/ymj/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/safetensors/__init__.py"
+    },
+    "copied_llava": {
+      "file": "/data/ymj/code/llm/prefix-ttt/third_party/llava/llava/__init__.py"
+    }
+  },
+  "cuda": {
+    "torch_build": "12.8",
+    "available": false,
+    "device_count": 0,
+    "toolkit": {
+      "argv": [
+        "/usr/local/cuda-12.8/bin/nvcc",
+        "--version"
+      ],
+      "returncode": 0,
+      "stdout": "nvcc: NVIDIA (R) Cuda compiler driver\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Feb_21_20:23:50_PST_2025\nCuda compilation tools, release 12.8, V12.8.93\nBuild cuda_12.8.r12.8/compiler.35583870_0",
+      "stderr": ""
+    },
+    "gpu_tests": "not_run_until_user_mount"
+  },
+  "systemd_user": {
+    "argv": [
+      "systemctl",
+      "--user",
+      "is-system-running"
+    ],
+    "returncode": 1,
+    "stdout": "offline",
+    "stderr": ""
+  },
+  "systemd_bus": {
+    "argv": [
+      "systemctl",
+      "--user",
+      "list-units",
+      "--type=service",
+      "--no-pager"
+    ],
+    "returncode": 1,
+    "stdout": "",
+    "stderr": "Failed to connect to bus: $DBUS_SESSION_BUS_ADDRESS and $XDG_RUNTIME_DIR not defined (consider using --machine=<user>@.host --user to connect to bus of other user)"
+  },
+  "reference_repositories": {
+    "LLaVA": {
+      "path": "/data/ymj/code/llm/prefix-ttt/preference/LLaVA",
+      "commit": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LLaVA",
+          "rev-parse",
+          "HEAD"
+        ],
+        "returncode": 0,
+        "stdout": "c121f0432da27facab705978f83c4ada465e46fd",
+        "stderr": ""
+      },
+      "branch": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LLaVA",
+          "branch",
+          "--show-current"
+        ],
+        "returncode": 0,
+        "stdout": "main",
+        "stderr": ""
+      },
+      "remote": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LLaVA",
+          "remote",
+          "get-url",
+          "origin"
+        ],
+        "returncode": 0,
+        "stdout": "git@github.com:haotian-liu/LLaVA.git",
+        "stderr": ""
+      },
+      "dirty": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LLaVA",
+          "status",
+          "--porcelain"
+        ],
+        "returncode": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    "LaCT": {
+      "path": "/data/ymj/code/llm/prefix-ttt/preference/LaCT",
+      "commit": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LaCT",
+          "rev-parse",
+          "HEAD"
+        ],
+        "returncode": 0,
+        "stdout": "1c2109fef1cf707c1025643d73684fe5e0920cc6",
+        "stderr": ""
+      },
+      "branch": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LaCT",
+          "branch",
+          "--show-current"
+        ],
+        "returncode": 0,
+        "stdout": "main",
+        "stderr": ""
+      },
+      "remote": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LaCT",
+          "remote",
+          "get-url",
+          "origin"
+        ],
+        "returncode": 0,
+        "stdout": "git@github.com:JunchenLiu77/LaCT.git",
+        "stderr": ""
+      },
+      "dirty": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LaCT",
+          "status",
+          "--porcelain"
+        ],
+        "returncode": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    "Spatial-TTT": {
+      "path": "/data/ymj/code/llm/prefix-ttt/preference/Spatial-TTT",
+      "commit": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/Spatial-TTT",
+          "rev-parse",
+          "HEAD"
+        ],
+        "returncode": 0,
+        "stdout": "e2e33a62b6f92c33b7e24ff042be9737d05c5bdb",
+        "stderr": ""
+      },
+      "branch": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/Spatial-TTT",
+          "branch",
+          "--show-current"
+        ],
+        "returncode": 0,
+        "stdout": "main",
+        "stderr": ""
+      },
+      "remote": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/Spatial-TTT",
+          "remote",
+          "get-url",
+          "origin"
+        ],
+        "returncode": 0,
+        "stdout": "git@github.com:THU-SI/Spatial-TTT.git",
+        "stderr": ""
+      },
+      "dirty": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/Spatial-TTT",
+          "status",
+          "--porcelain"
+        ],
+        "returncode": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  },
+  "uv_lock_sha256": "6631b32a7f9ad040dd4a507eecdf5ed0a9ee8a6185b0502e363229af4c6d8b07",
+  "fla_revision": "c51953382397da5c3b7b8a41e568915b703e2934",
+  "flash_attention": "not_installed; PyTorch SDPA selected; actual GPU kernel not verified"
+}

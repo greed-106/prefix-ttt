@@ -1,0 +1,24 @@
+Current Python version 3.10 is below the recommended 3.11 version. It is recommended to upgrade to Python 3.11 or higher for the best experience.
+/data/ymj/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/fla/utils/_device.py:113: UserWarning: Triton is not supported on current platform, roll back to CPU.
+  _cpu_device_warning()
+{
+  "output": "docs/experiments/2026-09-09-prefix-ttt/environment.lock.json",
+  "cuda": {
+    "torch_build": "12.8",
+    "available": false,
+    "device_count": 0,
+    "toolkit": {
+      "argv": [
+        "/usr/local/cuda-12.8/bin/nvcc",
+        "--version"
+      ],
+      "returncode": 0,
+      "stdout": "nvcc: NVIDIA (R) Cuda compiler driver\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Feb_21_20:23:50_PST_2025\nCuda compilation tools, release 12.8, V12.8.93\nBuild cuda_12.8.r12.8/compiler.35583870_0",
+      "stderr": ""
+    },
+    "gpu_tests": "not_run_until_user_mount"
+  },
+  "package_import_errors": {
+    "flash-linear-attention": "RuntimeError: 0 active drivers ([]). There should only be one."
+  }
+}

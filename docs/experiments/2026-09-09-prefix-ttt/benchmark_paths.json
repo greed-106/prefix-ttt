@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "execution": "CPU bytes/SHA256/Arrow schema audit; no quality evaluation",
+  "tasks": {
+    "gqa": {
+      "source_manifest": "/data/ymj/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/source-v5-manifests/tasks/gqa.json",
+      "source_manifest_sha256": "7e621ab8133c57439d48fb5396f9d8123c8e3f0d232ad3eebd800de06a5e2e29",
+      "files": [
+        {
+          "original_path": "/home/ymj/.cache/huggingface/datasets/lmms-lab___gqa/testdev_balanced_images/0.0.0/a6e72d6e1b912da88af8b2f9eba05d5ea8ec2dd8/gqa-testdev.arrow",
+          "local_path": "/data/ymj/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/hf-home/datasets/lmms-lab___gqa/testdev_balanced_images/0.0.0/a6e72d6e1b912da88af8b2f9eba05d5ea8ec2dd8/gqa-testdev.arrow",
+          "bytes": 65782744,
+          "sha256": "5c9738790264b2de4c4365c9e7ef733d4fbb60d0eef2953819cfd219587c8c35",
+          "rows": 398,
+          "schema": "id: string\nimage: struct<bytes: binary, path: string>\n  child 0, bytes: binary\n  child 1, path: string\n-- schema metadata --\nhuggingface: '{\"info\": {\"features\": {\"id\": {\"dtype\": \"string\", \"_type\": \"' + 39"
+        },
+        {
+          "original_path": "/home/ymj/.cache/huggingface/datasets/lmms-lab___gqa/testdev_balanced_instructions/0.0.0/a6e72d6e1b912da88af8b2f9eba05d5ea8ec2dd8/gqa-testdev.arrow",
+          "local_path": "/data/ymj/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/hf-home/datasets/lmms-lab___gqa/testdev_balanced_instructions/0.0.0/a6e72d6e1b912da88af8b2f9eba05d5ea8ec2dd8/gqa-testdev.arrow",
+          "bytes": 6146184,
+          "sha256": "943eba2b3fe030e70fb17661ac57c505d98f69b0a3f7ed5333f52d5f30dec1b2",
+          "rows": 12578,
+          "schema": "id: string\nimageId: string\nquestion: string\nanswer: string\nfullAnswer: string\nisBalanced: bool\ngroups: struct<global: string, local: string>\n  child 0, global: string\n  child 1, local: string\nentailed: string\nequivalent: string\ntypes: struct<structural: string, semantic: string, detailed: string>\n  child 0, structural: string\n  child 1, semantic: string\n  child 2, detailed: string\nannotations: struct<question: list<item: struct<objectId: string, value: string>>, answer: list<item: struct<objectId: string, value: string>>, fullAnswer: list<item: struct<objectId: string, value: string>>>\n  child 0, question: list<item: struct<objectId: string, value: string>>\n      child 0, item: struct<objectId: string, value: string>\n          child 0, objectId: string\n          child 1, value: string\n  child 1, answer: list<item: struct<objectId: string, value: string>>\n      child 0, item: struct<objectId: string, value: string>\n          child 0, objectId: string\n          child 1, value: string\n  child 2, fullAnswer: list<item: struct<objectId: string, value: string>>\n      child 0, item: struct<objectId: string, value: string>\n          child 0, objectId: string\n          child 1, value: string\nsemantic: list<item: struct<operation: string, argument: string, dependencies: list<item: int32>>>\n  child 0, item: struct<operation: string, argument: string, dependencies: list<item: int32>>\n      child 0, operation: string\n      child 1, argument: string\n      child 2, dependencies: list<item: int32>\n          child 0, item: int32\nsemanticStr: string\n-- schema metadata --\nhuggingface: '{\"info\": {\"features\": {\"id\": {\"dtype\": \"string\", \"_type\": \"' + 1374"
+        }
+      ],
+      "evaluation": "not_run"
+    },
+    "pope": {
+      "source_manifest": "/data/ymj/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/source-v5-manifests/tasks/pope.json",
+      "source_manifest_sha256": "3258de54c425b491a322ccf12180cdeb75279dcec62fd6bb784ffe76dd8fbfbe",
+      "files": [
+        {
+          "original_path": "/home/ymj/.cache/huggingface/datasets/lmms-lab___pope/default/0.0.0/4db1276663dfa5eb8ad16a52d24c31a09e470896/pope-test-00000-of-00003.arrow",
+          "local_path": "/data/ymj/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/hf-home/datasets/lmms-lab___pope/default/0.0.0/4db1276663dfa5eb8ad16a52d24c31a09e470896/pope-test-00000-of-00003.arrow",
+          "bytes": 505930752,
+          "sha256": "be3450bd9072049b0efaf5406972d789a86655292b0b8362fa9aaad7e633daf8",
+          "rows": 3100,
+          "schema": "id: string\nquestion_id: string\nquestion: string\nanswer: string\nimage_source: string\nimage: struct<bytes: binary, path: string>\n  child 0, bytes: binary\n  child 1, path: string\ncategory: string\n-- schema metadata --\nhuggingface: '{\"info\": {\"features\": {\"id\": {\"dtype\": \"string\", \"_type\": \"' + 299"
+        },
+        {
+          "original_path": "/home/ymj/.cache/huggingface/datasets/lmms-lab___pope/default/0.0.0/4db1276663dfa5eb8ad16a52d24c31a09e470896/pope-test-00001-of-00003.arrow",
+          "local_path": "/data/ymj/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/hf-home/datasets/lmms-lab___pope/default/0.0.0/4db1276663dfa5eb8ad16a52d24c31a09e470896/pope-test-00001-of-00003.arrow",
+          "bytes": 505008984,
+          "sha256": "4d370b2f39cecddb7624e88ac4b88231cdb7bb375ef05a34253f885bde13b452",
+          "rows": 3100,
+          "schema": "id: string\nquestion_id: string\nquestion: string\nanswer: string\nimage_source: string\nimage: struct<bytes: binary, path: string>\n  child 0, bytes: binary\n  child 1, path: string\ncategory: string\n-- schema metadata --\nhuggingface: '{\"info\": {\"features\": {\"id\": {\"dtype\": \"string\", \"_type\": \"' + 299"
+        },
+        {
+          "original_path": "/home/ymj/.cache/huggingface/datasets/lmms-lab___pope/default/0.0.0/4db1276663dfa5eb8ad16a52d24c31a09e470896/pope-test-00002-of-00003.arrow",
+          "local_path": "/data/ymj/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/hf-home/datasets/lmms-lab___pope/default/0.0.0/4db1276663dfa5eb8ad16a52d24c31a09e470896/pope-test-00002-of-00003.arrow",
+          "bytes": 460365784,
+          "sha256": "c1d5d70cfc4c936cb6f41bac0fdc90703e4883ab4f1ca7e6a5ff3a1537f5e58c",
+          "rows": 2800,
+          "schema": "id: string\nquestion_id: string\nquestion: string\nanswer: string\nimage_source: string\nimage: struct<bytes: binary, path: string>\n  child 0, bytes: binary\n  child 1, path: string\ncategory: string\n-- schema metadata --\nhuggingface: '{\"info\": {\"features\": {\"id\": {\"dtype\": \"string\", \"_type\": \"' + 299"
+        }
+      ],
+      "evaluation": "not_run"
+    },
+    "mme": {
+      "source_manifest": "/data/ymj/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/source-v5-manifests/tasks/mme.json",
+      "source_manifest_sha256": "73385d632f24eaa416f16909656884ad64f7b472023267dfdf17a0601a80581f",
+      "files": [
+        {
+          "original_path": "/home/ymj/.cache/huggingface/datasets/lmms-lab___mme/default/0.0.0/d6c9023f017b564f7b3ccccf5348166bce8fdbcd/mme-test-00000-of-00004.arrow",
+          "local_path": "/data/ymj/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/hf-home/datasets/lmms-lab___mme/default/0.0.0/d6c9023f017b564f7b3ccccf5348166bce8fdbcd/mme-test-00000-of-00004.arrow",
+          "bytes": 500298760,
+          "sha256": "c27ad1e8b781a66a3d6b0aa456e9415bb9f1e2a09be99c17e33740d79ea9bcbe",
+          "rows": 1288,
+          "schema": "question_id: string\nimage: struct<bytes: binary, path: string>\n  child 0, bytes: binary\n  child 1, path: string\nquestion: string\nanswer: string\ncategory: string\n-- schema metadata --\nhuggingface: '{\"info\": {\"features\": {\"question_id\": {\"dtype\": \"string\", \"' + 199"
+        },
+        {
+          "original_path": "/home/ymj/.cache/huggingface/datasets/lmms-lab___mme/default/0.0.0/d6c9023f017b564f7b3ccccf5348166bce8fdbcd/mme-test-00001-of-00004.arrow",
+          "local_path": "/data/ymj/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/hf-home/datasets/lmms-lab___mme/default/0.0.0/d6c9023f017b564f7b3ccccf5348166bce8fdbcd/mme-test-00001-of-00004.arrow",
+          "bytes": 598166432,
+          "sha256": "675ddbb3d7b152afc8d807bd711f12a95207d28cf564bc02be7119cd326645d3",
+          "rows": 200,
+          "schema": "question_id: string\nimage: struct<bytes: binary, path: string>\n  child 0, bytes: binary\n  child 1, path: string\nquestion: string\nanswer: string\ncategory: string\n-- schema metadata --\nhuggingface: '{\"info\": {\"features\": {\"question_id\": {\"dtype\": \"string\", \"' + 199"
+        },
+        {
+          "original_path": "/home/ymj/.cache/huggingface/datasets/lmms-lab___mme/default/0.0.0/d6c9023f017b564f7b3ccccf5348166bce8fdbcd/mme-test-00002-of-00004.arrow",
+          "local_path": "/data/ymj/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/hf-home/datasets/lmms-lab___mme/default/0.0.0/d6c9023f017b564f7b3ccccf5348166bce8fdbcd/mme-test-00002-of-00004.arrow",
+          "bytes": 579944112,
+          "sha256": "f95960bfc252033f85ecf6c2b3b5a1c4adc42bf25858f2117c44f332a7bf9a23",
+          "rows": 200,
+          "schema": "question_id: string\nimage: struct<bytes: binary, path: string>\n  child 0, bytes: binary\n  child 1, path: string\nquestion: string\nanswer: string\ncategory: string\n-- schema metadata --\nhuggingface: '{\"info\": {\"features\": {\"question_id\": {\"dtype\": \"string\", \"' + 199"
+        },
+        {
+          "original_path": "/home/ymj/.cache/huggingface/datasets/lmms-lab___mme/default/0.0.0/d6c9023f017b564f7b3ccccf5348166bce8fdbcd/mme-test-00003-of-00004.arrow",
+          "local_path": "/data/ymj/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/hf-home/datasets/lmms-lab___mme/default/0.0.0/d6c9023f017b564f7b3ccccf5348166bce8fdbcd/mme-test-00003-of-00004.arrow",
+          "bytes": 54726832,
+          "sha256": "55e4ccb9576dee78eb4647cc69efd8713147e5321056b8e78582d4eb3b0e9a3b",
+          "rows": 686,
+          "schema": "question_id: string\nimage: struct<bytes: binary, path: string>\n  child 0, bytes: binary\n  child 1, path: string\nquestion: string\nanswer: string\ncategory: string\n-- schema metadata --\nhuggingface: '{\"info\": {\"features\": {\"question_id\": {\"dtype\": \"string\", \"' + 199"
+        }
+      ],
+      "evaluation": "not_run"
+    }
+  }
+}

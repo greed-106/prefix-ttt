@@ -1,0 +1,34 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-8.4.2, pluggy-1.6.0
+rootdir: /data/ymj/code/llm/prefix-ttt
+configfile: pyproject.toml
+collected 2 items
+
+tests/test_supervisor.py Supervisor evidence: /var/tmp/prefix-ttt-supervisor-test-2hvnhhhd
+.Supervisor evidence: /var/tmp/prefix-ttt-supervisor-test-j9wzjbw7
+F
+
+=================================== FAILURES ===================================
+________________ test_graceful_stop_cleans_separate_job_session ________________
+
+service = (PosixPath('/var/tmp/prefix-ttt-supervisor-test-j9wzjbw7'), <function service.<locals>.launch at 0x7faa41ce5900>, <function service.<locals>.rows at 0x7faa41ce40d0>, <function service.<locals>.control at 0x7faa41ce5a20>)
+
+    def test_graceful_stop_cleans_separate_job_session(service):
+        root, launch, rows, control = service
+        ready = root / 'ready'
+        code = f"import subprocess,sys,time,pathlib; subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); pathlib.Path({str(ready)!r}).touch(); time.sleep(60)"
+        launch([job('long', code, 4, 90)])
+        eventually(lambda: ready.exists() and rows()[0]['status'] == 'running')
+        pid = rows()[0]['pid']
+        assert group_alive(pid)
+        assert control('stop', 'queue').returncode == 0
+>       assert rows()[0]['status'] == 'interrupted'
+E       AssertionError: assert 'running' == 'interrupted'
+E         
+E         - interrupted
+E         + running
+
+tests/test_supervisor.py:145: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_supervisor.py::test_graceful_stop_cleans_separate_job_session
+========================= 1 failed, 1 passed in 4.60s ==========================

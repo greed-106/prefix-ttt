@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "/usr/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/usr/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/data/ymj/code/llm/prefix-ttt/src/prefix_ttt/scheduler.py", line 253, in <module>
+    main()
+  File "/data/ymj/code/llm/prefix-ttt/src/prefix_ttt/scheduler.py", line 244, in main
+    queue = Queue(args.database, json.loads(Path(args.manifest).read_text()),
+  File "/data/ymj/code/llm/prefix-ttt/src/prefix_ttt/scheduler.py", line 102, in __init__
+    self.recover()
+  File "/data/ymj/code/llm/prefix-ttt/src/prefix_ttt/scheduler.py", line 142, in recover
+    raise RuntimeError("Previous job or process group is still live; refusing duplicate dispatch")
+RuntimeError: Previous job or process group is still live; refusing duplicate dispatch

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "project": "Prefix-TTT",
+  "seed": 42,
+  "lora_seed": 43,
+  "data_root": "data/llava-v1.5-assets-v1",
+  "model_relative_path": "models/llava-1.5-7b-hf-b234b804b114d9e37bb655e11cbbb5f5e971b7a9",
+  "template": "v1",
+  "max_expanded_length": 2048,
+  "image_aspect_ratio": "square",
+  "full_attention_layers": [0, 3, 7, 11, 15, 19, 23, 27, 31],
+  "candidate_ttt_layers": [0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, 16, 17, 18, 20, 21, 22, 24, 25, 26, 28, 29, 30],
+  "num_heads": 32,
+  "head_dim": 128,
+  "feature_dim": 128,
+  "local_block_size": 32,
+  "tile_size": 64,
+  "eta": 0.0078125,
+  "rms_eps": 0.000001,
+  "lora": {"rank": 32, "alpha": 64, "dropout": 0.0, "bias": "none"},
+  "training": {
+    "effective_batch_size": 128, "micro_batch_size": 1,
+    "stage_a_samples": 50000, "pilot_min_samples": 50000,
+    "new_module_lr": 0.0001, "lora_lr": 0.00002,
+    "betas": [0.9, 0.95], "eps": 0.00000001,
+    "matrix_weight_decay": 0.01, "warmup_fraction": 0.03,
+    "grad_clip": 1.0, "use_cache": false, "checkpoint_reentrant": false
+  },
+  "generation": {"do_sample": false, "num_beams": 1, "max_new_tokens": 128},
+  "gpu_ids": [0, 1, 2, 3],
+  "gpu_status": "user_authorized_four_A40_48GB_PCIE_2026-09-10"
+}

@@ -1,0 +1,20 @@
+[Unit]
+Description=Prefix-TTT fixed SQLite experiment queue
+
+[Service]
+Type=simple
+WorkingDirectory=/data/ymj/code/llm/prefix-ttt
+Environment=CUDA_HOME=/usr/local/cuda-12.8
+Environment=PATH=/usr/local/cuda-12.8/bin:/data/ymj/.pixi/bin:/usr/local/bin:/usr/bin:/bin
+Environment=LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64
+Environment=HF_ENDPOINT=https://hf-mirror.com
+Environment=PREFIX_TTT_QUEUE_ROOT=/var/tmp/prefix-ttt-1000
+# Replace GPU IDs only after user authorization and physical-device idle checks.
+# Manifest must specify explicit child environment and absolute uv argv paths.
+ExecStart=/data/ymj/.pixi/bin/uv run --frozen --no-sync python -m prefix_ttt.scheduler --manifest /data/ymj/code/llm/prefix-ttt/configs/jobs.json --database /var/tmp/prefix-ttt-1000/queue.sqlite3 --gpu-ids 0,1
+KillMode=control-group
+TimeoutStopSec=30
+Restart=no
+
+[Install]
+WantedBy=default.target

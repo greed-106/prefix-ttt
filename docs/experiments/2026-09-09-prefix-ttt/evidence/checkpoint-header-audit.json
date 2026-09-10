@@ -1,0 +1,9 @@
+{
+  "tensor_count": 686,
+  "parameters": 7063427072,
+  "tensor_bytes": 14126854144,
+  "embedding_rows": 32064,
+  "missing": [],
+  "unexpected": [],
+  "execution": "safetensors headers and meta model only; no full forward"
+}
