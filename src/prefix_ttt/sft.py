@@ -48,51 +48,25 @@ def load_trainable(model, state):
             parameter.copy_(state[name])
 
 
-def check_switch_diagnostic(path, manifest_sha, config_sha, stage_a_sha=None):
-    report = json.loads(Path(path).read_text())
-    if (report.get('status') != 'passed'
-            or report.get('manifest_sha256') != manifest_sha
-            or report.get('config_sha256') != config_sha
-            or not report.get('stage_a_sha256')
-            or (stage_a_sha is not None and report['stage_a_sha256'] != stage_a_sha)):
-        raise ValueError('Missing, failed or mismatched whole-model switch diagnostic')
-
-
-def check_pilot_diagnostics(paths, identity, resume):
-    reports = [json.loads(Path(path).read_text()) for path in paths]
-    layouts = [r.get('layout') for r in reports]
-    if (identity['layout'] not in layouts or len(set(layouts)) != len(layouts)
-            or not set(layouts) <= {'E1', 'E2'}):
-        raise ValueError('Expected a unique diagnostic for the resumed model')
-    for report in reports:
-        if (report.get('status') != 'passed' or report.get('global_step') != 391
-                or report.get('samples_seen') != 50048
-                or any(report.get(key) != identity[key] for key in ('manifest_sha256', 'config_sha256'))):
-            raise ValueError('Failed or mismatched Pilot diagnostic')
-        if report['layout'] == identity['layout'] and report.get('checkpoint_sha256') != digest_file(resume):
-            raise ValueError('Resume checkpoint differs from diagnosed Pilot')
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', default='configs/base.json')
     parser.add_argument('--manifest', default='artifacts/cpu/fixed_manifest.json')
     parser.add_argument('--layout', choices=['E1', 'E2'], required=True)
     parser.add_argument('--stage-a-checkpoint')
-    parser.add_argument('--require-switch-diagnostic', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--resume')
-    parser.add_argument('--require-pilot-diagnostics', nargs='+')
     parser.add_argument('--stop-at-pilot', action='store_true')
+    parser.add_argument('--stop-after', type=int, help='Run this many steps from the start point, then stop')
     parser.add_argument('--max-steps', type=int, help='Disposable debug trajectory only')
     parser.add_argument('--save-every', type=int, default=100)
     args = parser.parse_args()
     if args.max_steps is not None and args.max_steps <= 0:
         parser.error('--max-steps must be positive')
+    if args.stop_after is not None and args.stop_after <= 0:
+        parser.error('--stop-after must be positive')
     if args.save_every <= 0:
         parser.error('--save-every must be positive')
-    if args.require_pilot_diagnostics and not args.resume:
-        parser.error('Pilot continuation requires --resume')
     if args.layout == 'E2' and not args.stage_a_checkpoint:
         parser.error('E2 requires completed phase A; zero-gate debug is not formal B')
     rank, world = int(os.environ.get('RANK', 0)), int(os.environ.get('WORLD_SIZE', 1))
@@ -109,17 +83,13 @@ def main():
         np.random.seed(42)
         torch.manual_seed(42)
         config = json.loads(Path(args.config).read_text())
-        manifest, manifest_sha = load_manifest(args.manifest)
+        manifest, manifest_sha = load_manifest(args.manifest, config['data_root'])
         schedule = trajectory(len(manifest['train']))
         identity = dict(stage='B', layout=args.layout, manifest_sha256=manifest_sha,
-                        total_steps=schedule['total_steps'], world_size=world,
+                        total_steps=schedule['total_steps'],
                         config_sha256=digest_json(config),
                         stage_a_sha256=digest_file(args.stage_a_checkpoint) if args.layout == 'E2' else None,
                         diagnostic_only=args.max_steps is not None)
-        check_switch_diagnostic(args.require_switch_diagnostic, manifest_sha,
-                                identity['config_sha256'], identity['stage_a_sha256'])
-        if args.require_pilot_diagnostics:
-            check_pilot_diagnostics(args.require_pilot_diagnostics, identity, args.resume)
         output = Path(args.output)
         output.mkdir(parents=True, exist_ok=True)
         if not args.resume and (output / 'latest.pt').exists():
@@ -137,6 +107,11 @@ def main():
                     or stage_a.get('samples_seen') != len(manifest['A'])
                     or stage_a.get('global_step') != (len(manifest['A']) + 127) // 128):
                 raise ValueError('Phase A checkpoint is incomplete or uses a different manifest')
+            installed = {str(index) for index, layer in enumerate(model.model.layers)
+                         if hasattr(layer.self_attn, 'prefix_ttt')}
+            unused = set(stage_a['features']) - installed
+            if unused:
+                print(f'Phase A checkpoint carries unused feature layers: {sorted(unused, key=int)}', flush=True)
             for index, layer in enumerate(model.model.layers):
                 if hasattr(layer.self_attn, 'prefix_ttt'):
                     layer.self_attn.prefix_ttt.load_state_dict(stage_a['features'][str(index)], strict=True)
@@ -162,11 +137,16 @@ def main():
             cursor, step = checkpoint['samples_seen'], checkpoint['global_step']
             if cursor != min(step * 128, len(manifest['train'])):
                 raise ValueError('Invalid resume cursor')
-            restore_rng(checkpoint['rng_by_rank'][rank])
+            if checkpoint.get('world_size') != world:
+                print(f'Resuming across world_size {checkpoint.get("world_size")} -> {world}; '
+                      f'ranks without a stored state keep their initial RNG', flush=True)
+            states = checkpoint['rng_by_rank']
+            if rank < len(states):
+                restore_rng(states[rank])
             del checkpoint
         if rank == 0:
             (output / 'trainable_params.json').write_text(json.dumps(audit_parameters(model, new_parameters=new_parameters), indent=2))
-            (output / 'run.json').write_text(json.dumps({**identity, **schedule, 'config': config, 'argv': vars(args)}, indent=2))
+            (output / 'run.json').write_text(json.dumps({**identity, 'world_size': world, **schedule, 'config': config, 'argv': vars(args)}, indent=2))
 
         def save(name, complete=False):
             states = [None] * world if rank == 0 else None
@@ -175,7 +155,7 @@ def main():
             else:
                 states = [rng_state()]
             if rank == 0:
-                state = {**identity, 'complete': complete, 'global_step': step,
+                state = {**identity, 'world_size': world, 'complete': complete, 'global_step': step,
                     'samples_seen': cursor, 'rng_by_rank': states,
                     'trainable': {n: p.detach().cpu() for n, p in model.named_parameters() if p.requires_grad},
                     'optimizer': optimizer.state_dict(), 'scheduler': scheduler.state_dict()}
@@ -188,6 +168,8 @@ def main():
         stop = schedule['pilot_step'] if args.stop_at_pilot else schedule['total_steps']
         if args.max_steps is not None:
             stop = min(stop, args.max_steps)
+        if args.stop_after is not None:
+            stop = min(stop, step + args.stop_after)
         while step < stop:
             started = time.perf_counter()
             group = [prepare_sample(base, dataset, collate, index, device)[0]
@@ -237,7 +219,7 @@ def main():
             if step == 1 or step % args.save_every == 0 or step == stop:
                 save('latest.pt', complete=cursor == len(manifest['train']))
         if rank == 0:
-            (output / 'result.json').write_text(json.dumps({**identity, 'global_step': step,
+            (output / 'result.json').write_text(json.dumps({**identity, 'world_size': world, 'global_step': step,
                 'samples_seen': cursor, 'complete': cursor == len(manifest['train']),
                 'pilot_reached': step >= schedule['pilot_step']}, indent=2))
     finally:

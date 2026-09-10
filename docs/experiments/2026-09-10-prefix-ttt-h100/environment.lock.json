@@ -1,0 +1,326 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-09-10T12:09:00.403246+00:00",
+  "cpu_cgroup_quota": null,
+  "platform": "Linux-5.15.0-122-generic-x86_64-with-glibc2.35",
+  "python": "3.10.12 (main, Jul 15 2026, 23:40:17) [GCC 11.4.0]",
+  "executable": "/data/mjyang/code/llm/prefix-ttt/.venv/bin/python3",
+  "uv": {
+    "argv": [
+      "/data/mjyang/.local/bin/uv",
+      "--version"
+    ],
+    "returncode": 0,
+    "stdout": "uv 0.12.10 (x86_64-unknown-linux-gnu)",
+    "stderr": ""
+  },
+  "packages": {
+    "torch": {
+      "version": "2.7.1+cu128",
+      "file": "/data/mjyang/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/torch/__init__.py"
+    },
+    "torchvision": {
+      "version": "0.22.1+cu128",
+      "file": "/data/mjyang/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/torchvision/__init__.py"
+    },
+    "triton": {
+      "version": "3.3.1",
+      "file": "/data/mjyang/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/triton/__init__.py"
+    },
+    "transformers": {
+      "version": "4.51.3",
+      "file": "/data/mjyang/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/transformers/__init__.py"
+    },
+    "peft": {
+      "version": "0.15.2",
+      "file": "/data/mjyang/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/peft/__init__.py"
+    },
+    "accelerate": {
+      "version": "1.6.0",
+      "file": "/data/mjyang/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/accelerate/__init__.py"
+    },
+    "flash-linear-attention": {
+      "version": "0.6.0",
+      "file": "/data/mjyang/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/fla/__init__.py"
+    },
+    "prefix-ttt": {
+      "version": "0.1.0",
+      "file": "/data/mjyang/code/llm/prefix-ttt/src/prefix_ttt/__init__.py"
+    },
+    "tokenizers": {
+      "version": "0.21.4",
+      "file": "/data/mjyang/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/tokenizers/__init__.py"
+    },
+    "safetensors": {
+      "version": "0.5.3",
+      "file": "/data/mjyang/code/llm/prefix-ttt/.venv/lib/python3.10/site-packages/safetensors/__init__.py"
+    },
+    "copied_llava": {
+      "file": "/data/mjyang/code/llm/prefix-ttt/third_party/llava/llava/__init__.py"
+    }
+  },
+  "cuda": {
+    "torch_build": "12.8",
+    "available": true,
+    "device_count": 8,
+    "toolkit": {
+      "argv": [
+        "/usr/local/cuda-12.8/bin/nvcc",
+        "--version"
+      ],
+      "returncode": 0,
+      "stdout": "nvcc: NVIDIA (R) Cuda compiler driver\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Feb_21_20:23:50_PST_2025\nCuda compilation tools, release 12.8, V12.8.93\nBuild cuda_12.8.r12.8/compiler.35583870_0",
+      "stderr": ""
+    },
+    "devices": [
+      {
+        "name": "NVIDIA H100 80GB HBM3",
+        "total_memory": 85028372480,
+        "capability": [
+          9,
+          0
+        ]
+      },
+      {
+        "name": "NVIDIA H100 80GB HBM3",
+        "total_memory": 85028372480,
+        "capability": [
+          9,
+          0
+        ]
+      },
+      {
+        "name": "NVIDIA H100 80GB HBM3",
+        "total_memory": 85028372480,
+        "capability": [
+          9,
+          0
+        ]
+      },
+      {
+        "name": "NVIDIA H100 80GB HBM3",
+        "total_memory": 85028372480,
+        "capability": [
+          9,
+          0
+        ]
+      },
+      {
+        "name": "NVIDIA H100 80GB HBM3",
+        "total_memory": 85028372480,
+        "capability": [
+          9,
+          0
+        ]
+      },
+      {
+        "name": "NVIDIA H100 80GB HBM3",
+        "total_memory": 85028372480,
+        "capability": [
+          9,
+          0
+        ]
+      },
+      {
+        "name": "NVIDIA H100 80GB HBM3",
+        "total_memory": 85028372480,
+        "capability": [
+          9,
+          0
+        ]
+      },
+      {
+        "name": "NVIDIA H100 80GB HBM3",
+        "total_memory": 85028372480,
+        "capability": [
+          9,
+          0
+        ]
+      }
+    ],
+    "gpu_tests": "not_executed_by_environment_audit"
+  },
+  "systemd_user": {
+    "argv": [
+      "systemctl",
+      "--user",
+      "is-system-running"
+    ],
+    "returncode": 0,
+    "stdout": "running",
+    "stderr": ""
+  },
+  "systemd_bus": {
+    "argv": [
+      "systemctl",
+      "--user",
+      "list-units",
+      "--type=service",
+      "--no-pager"
+    ],
+    "returncode": 0,
+    "stdout": "UNIT LOAD ACTIVE SUB DESCRIPTION\n0 loaded units listed. Pass --all to see loaded but inactive units, too.\nTo show all installed unit files use 'systemctl list-unit-files'.",
+    "stderr": ""
+  },
+  "reference_repositories": {
+    "LLaVA": {
+      "path": "/data/mjyang/code/llm/prefix-ttt/preference/LLaVA",
+      "commit": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LLaVA",
+          "rev-parse",
+          "HEAD"
+        ],
+        "returncode": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to 'preference/LLaVA': No such file or directory"
+      },
+      "branch": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LLaVA",
+          "branch",
+          "--show-current"
+        ],
+        "returncode": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to 'preference/LLaVA': No such file or directory"
+      },
+      "remote": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LLaVA",
+          "remote",
+          "get-url",
+          "origin"
+        ],
+        "returncode": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to 'preference/LLaVA': No such file or directory"
+      },
+      "dirty": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LLaVA",
+          "status",
+          "--porcelain"
+        ],
+        "returncode": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to 'preference/LLaVA': No such file or directory"
+      }
+    },
+    "LaCT": {
+      "path": "/data/mjyang/code/llm/prefix-ttt/preference/LaCT",
+      "commit": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LaCT",
+          "rev-parse",
+          "HEAD"
+        ],
+        "returncode": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to 'preference/LaCT': No such file or directory"
+      },
+      "branch": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LaCT",
+          "branch",
+          "--show-current"
+        ],
+        "returncode": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to 'preference/LaCT': No such file or directory"
+      },
+      "remote": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LaCT",
+          "remote",
+          "get-url",
+          "origin"
+        ],
+        "returncode": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to 'preference/LaCT': No such file or directory"
+      },
+      "dirty": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/LaCT",
+          "status",
+          "--porcelain"
+        ],
+        "returncode": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to 'preference/LaCT': No such file or directory"
+      }
+    },
+    "Spatial-TTT": {
+      "path": "/data/mjyang/code/llm/prefix-ttt/preference/Spatial-TTT",
+      "commit": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/Spatial-TTT",
+          "rev-parse",
+          "HEAD"
+        ],
+        "returncode": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to 'preference/Spatial-TTT': No such file or directory"
+      },
+      "branch": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/Spatial-TTT",
+          "branch",
+          "--show-current"
+        ],
+        "returncode": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to 'preference/Spatial-TTT': No such file or directory"
+      },
+      "remote": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/Spatial-TTT",
+          "remote",
+          "get-url",
+          "origin"
+        ],
+        "returncode": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to 'preference/Spatial-TTT': No such file or directory"
+      },
+      "dirty": {
+        "argv": [
+          "git",
+          "-C",
+          "preference/Spatial-TTT",
+          "status",
+          "--porcelain"
+        ],
+        "returncode": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to 'preference/Spatial-TTT': No such file or directory"
+      }
+    }
+  },
+  "uv_lock_sha256": "7426306b361e2b3c5a5893bfc9012bc290e104358ae6b6da2432170086258d7e",
+  "fla_revision": "c51953382397da5c3b7b8a41e568915b703e2934",
+  "flash_attention": "not_installed; PyTorch SDPA selected; actual GPU kernel not verified"
+}

@@ -26,7 +26,7 @@ def main():
     if output.exists():
         raise ValueError('Diagnostic output exists; do not overwrite previous evidence')
     config = json.loads(Path(args.config).read_text())
-    manifest, manifest_sha = load_manifest(args.manifest)
+    manifest, manifest_sha = load_manifest(args.manifest, config['data_root'])
     config_sha = digest_json(config)
     checkpoint = torch.load(args.checkpoint, map_location='cpu', weights_only=False)
     expected = dict(stage='B', diagnostic_only=False, global_step=391, samples_seen=50048,

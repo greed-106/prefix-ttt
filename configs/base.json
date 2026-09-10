@@ -26,7 +26,5 @@
     "matrix_weight_decay": 0.01, "warmup_fraction": 0.03,
     "grad_clip": 1.0, "use_cache": false, "checkpoint_reentrant": false
   },
-  "generation": {"do_sample": false, "num_beams": 1, "max_new_tokens": 128},
-  "gpu_ids": [0, 1, 2, 3],
-  "gpu_status": "user_authorized_four_A40_48GB_PCIE_2026-09-10"
+  "generation": {"do_sample": false, "num_beams": 1, "max_new_tokens": 128}
 }

@@ -1,0 +1,44 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-8.4.2, pluggy-1.6.0 -- /data/mjyang/code/llm/prefix-ttt/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /data/mjyang/code/llm/prefix-ttt
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.15.1
+collecting ... collected 185 items / 168 deselected / 17 selected
+
+tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[1] PASSED [  5%]
+tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[2] PASSED [ 11%]
+tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[31] PASSED [ 17%]
+tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[32] PASSED [ 23%]
+tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[33] PASSED [ 29%]
+tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[63] PASSED [ 35%]
+tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[64] PASSED [ 41%]
+tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[65] PASSED [ 47%]
+tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[127] PASSED [ 52%]
+tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[128] PASSED [ 58%]
+tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[129] PASSED [ 64%]
+tests/test_gpu_acceptance.py::test_fla_future_causality_and_past_influence PASSED [ 70%]
+tests/test_gpu_acceptance.py::test_fla_segmented_tail_and_cross_state_gradients PASSED [ 76%]
+tests/test_ops.py::test_fla_gpu_varlen_output_state_and_gradients[16] PASSED [ 82%]
+tests/test_ops.py::test_fla_gpu_varlen_output_state_and_gradients[32] PASSED [ 88%]
+tests/test_ops.py::test_fla_gpu_varlen_output_state_and_gradients[64] PASSED [ 94%]
+tests/test_ops.py::test_fla_gpu_varlen_output_state_and_gradients[128] PASSED [100%]
+
+============================== slowest durations ===============================
+18.95s call     tests/test_ops.py::test_fla_gpu_varlen_output_state_and_gradients[16]
+18.86s call     tests/test_ops.py::test_fla_gpu_varlen_output_state_and_gradients[128]
+18.74s call     tests/test_ops.py::test_fla_gpu_varlen_output_state_and_gradients[32]
+12.86s call     tests/test_gpu_acceptance.py::test_fla_segmented_tail_and_cross_state_gradients
+9.38s call     tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[1]
+0.03s call     tests/test_ops.py::test_fla_gpu_varlen_output_state_and_gradients[64]
+0.01s call     tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[127]
+0.01s call     tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[128]
+0.01s call     tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[129]
+0.01s call     tests/test_gpu_acceptance.py::test_fla_future_causality_and_past_influence
+0.01s call     tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[63]
+0.01s call     tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[65]
+0.01s call     tests/test_gpu_acceptance.py::test_fla_lengths_nonzero_initial_state[64]
+
+(38 durations < 0.005s hidden.  Use -vv to show these durations.)
+================ 17 passed, 168 deselected in 82.50s (0:01:22) =================

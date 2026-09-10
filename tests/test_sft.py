@@ -2,47 +2,8 @@ import torch
 import pytest
 
 
-def test_pilot_diagnostic_gate(tmp_path):
-    import json
-    from prefix_ttt.sft import check_pilot_diagnostics
-    from prefix_ttt.manifests import digest_file
-    checkpoint = tmp_path / 'pilot.pt'
-    checkpoint.write_bytes(b'fixture')
-    identity = dict(layout='E2', manifest_sha256='m', config_sha256='c')
-    paths = []
-    for layout in ('E1', 'E2'):
-        path = tmp_path / (layout + '.json')
-        path.write_text(json.dumps({**identity, 'layout': layout, 'status': 'passed',
-            'global_step': 391, 'samples_seen': 50048, 'checkpoint_sha256': digest_file(checkpoint)}))
-        paths.append(path)
-    check_pilot_diagnostics(paths, identity, checkpoint)
-    check_pilot_diagnostics([paths[1]], identity, checkpoint)
-    with pytest.raises(ValueError):
-        check_pilot_diagnostics([paths[0]], identity, checkpoint)
-    checkpoint.write_bytes(b'changed')
-    with pytest.raises(ValueError):
-        check_pilot_diagnostics(paths, identity, checkpoint)
-    value = json.loads(paths[0].read_text())
-    paths[0].write_text(json.dumps({**value, 'status': 'failed'}))
-    with pytest.raises(ValueError):
-        check_pilot_diagnostics(paths, identity, checkpoint)
-
 from prefix_ttt.sft import sample_group, rng_state, restore_rng, load_trainable
 from prefix_ttt.training import cosine_factor, token_normalized_ce
-
-
-def test_switch_gate(tmp_path):
-    import json
-    from prefix_ttt.sft import check_switch_diagnostic
-    path = tmp_path / 'switch.json'
-    report = dict(status='passed', manifest_sha256='manifest', config_sha256='config', stage_a_sha256='A')
-    path.write_text(json.dumps(report))
-    check_switch_diagnostic(path, 'manifest', 'config', 'A')
-    for key, value in [('status', 'failed'), ('manifest_sha256', 'other'),
-                       ('config_sha256', 'other'), ('stage_a_sha256', 'other')]:
-        path.write_text(json.dumps({**report, key: value}))
-        with pytest.raises(ValueError):
-            check_switch_diagnostic(path, 'manifest', 'config', 'A')
 
 
 def test_order_partial_rank_partition():

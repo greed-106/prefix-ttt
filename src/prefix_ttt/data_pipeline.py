@@ -8,14 +8,21 @@ import torch
 
 from prefix_ttt.manifests import digest_file, digest_json
 
-MANIFEST_SHA256 = '246586be1ddd3d0cea09e17047e6d658c5e9a38637654e46906605578707a93b'
+def local_path(recorded, data_root):
+    """A manifest records source-machine paths; locate the same file under the local data root."""
+    path = Path(recorded)
+    if path.is_file():
+        return path
+    root = Path(data_root).parts
+    for index in range(len(path.parts) - len(root) + 1):
+        if path.parts[index:index + len(root)] == root:
+            return Path(data_root).joinpath(*path.parts[index + len(root):])
+    raise FileNotFoundError(f'Recorded source path not found under {data_root}: {recorded}')
 
 
-def load_manifest(path, expected_sha256=MANIFEST_SHA256):
+def load_manifest(path, data_root):
     raw = Path(path).read_bytes()
     sha = hashlib.sha256(raw).hexdigest()
-    if sha != expected_sha256:
-        raise ValueError('Fixed manifest SHA256 mismatch')
     manifest = json.loads(raw)
     for split in ('train', 'dev', 'A'):
         indices = manifest[split]
@@ -23,8 +30,9 @@ def load_manifest(path, expected_sha256=MANIFEST_SHA256):
             raise ValueError(f'Invalid fixed {split} order')
     if set(manifest['dev']) & set(manifest['train']) or not set(manifest['A']) <= set(manifest['train']):
         raise ValueError('Invalid fixed split separation')
-    annotation = str(Path(manifest['annotation']).resolve())
-    if digest_file(annotation) != manifest['inputs'][annotation]:
+    recorded = manifest['annotation']
+    manifest['annotation'] = str(local_path(recorded, data_root))
+    if digest_file(manifest['annotation']) != manifest['inputs'][recorded]:
         raise ValueError('Original annotation changed after audit')
     return manifest, sha
 

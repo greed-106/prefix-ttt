@@ -165,10 +165,10 @@ def main():
         np.random.seed(42)
         torch.manual_seed(42)
         config = json.loads(Path(args.config).read_text())
-        manifest, sha = load_manifest(args.manifest)
+        manifest, sha = load_manifest(args.manifest, config['data_root'])
         total_steps = math.ceil(len(manifest['A']) / 128)
         identity = dict(stage='A', manifest_sha256=sha, config_sha256=digest_json(config),
-                        world_size=world, total_steps=total_steps, diagnostic_only=args.max_steps is not None)
+                        total_steps=total_steps, diagnostic_only=args.max_steps is not None)
         output = Path(args.output)
         output.mkdir(parents=True, exist_ok=True)
         if not args.resume and (output / 'latest.pt').exists():
@@ -178,8 +178,9 @@ def main():
         teacher.requires_grad_(False).eval().to(device)
         tokenizer = load_tokenizer(path)
         dataset, collate = build_dataset(config, teacher, tokenizer, manifest)
+        anchors = set(config['full_attention_layers'])
         branches = nn.ModuleDict({str(index): FeatureReadout(seed=42 + index)
-                                  for index in config['candidate_ttt_layers']}).to(device)
+                                  for index in config['candidate_ttt_layers'] if index not in anchors}).to(device)
         optimizer = torch.optim.AdamW(branches.parameters(), lr=1e-4,
                                      betas=(0.9, 0.95), eps=1e-8, weight_decay=0.01)
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda step: cosine_factor(step, total_steps))
@@ -199,7 +200,7 @@ def main():
             del checkpoint
         hooks = TransferHooks(teacher, branches)
         if rank == 0:
-            (output / 'run.json').write_text(json.dumps({**identity, 'argv': vars(args), 'config': config}, indent=2))
+            (output / 'run.json').write_text(json.dumps({**identity, 'world_size': world, 'argv': vars(args), 'config': config}, indent=2))
 
         def save():
             states = [None] * world if rank == 0 else None
@@ -208,7 +209,7 @@ def main():
             else:
                 states = [rng_state()]
             if rank == 0:
-                checkpoint = {**identity, 'complete': cursor == len(manifest['A']),
+                checkpoint = {**identity, 'world_size': world, 'complete': cursor == len(manifest['A']),
                     'global_step': step, 'samples_seen': cursor, 'rng_by_rank': states,
                     'features': {key: {name: p.detach().cpu() for name, p in branch.state_dict().items()}
                                  for key, branch in branches.items()},
@@ -269,7 +270,7 @@ def main():
             if step == 1 or step % args.save_every == 0 or step == stop:
                 save()
         if rank == 0:
-            (output / 'result.json').write_text(json.dumps({**identity, 'complete': cursor == len(manifest['A']),
+            (output / 'result.json').write_text(json.dumps({**identity, 'world_size': world, 'complete': cursor == len(manifest['A']),
                 'samples_seen': cursor, 'global_step': step}, indent=2))
     finally:
         if hooks:

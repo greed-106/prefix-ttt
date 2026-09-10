@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -15,9 +16,19 @@ from prefix_ttt.scheduler import group_alive
 
 
 REPO = Path(__file__).resolve().parents[1]
-UV = Path('/data/ymj/.pixi/bin/uv')
-DAEMON = Path('/data/ymj/.pixi/bin/supervisord')
-CTL = Path('/data/ymj/.pixi/bin/supervisorctl')
+
+
+def _tool(name, override):
+    """Locate a host tool, allowing an explicit override for non-PATH installs."""
+    if override in os.environ:
+        return Path(os.environ[override])
+    found = shutil.which(name)
+    return Path(found) if found else REPO / name
+
+
+UV = _tool('uv', 'PREFIX_TTT_UV')
+DAEMON = _tool('supervisord', 'PREFIX_TTT_SUPERVISORD')
+CTL = _tool('supervisorctl', 'PREFIX_TTT_SUPERVISORCTL')
 pytestmark = pytest.mark.skipif(not DAEMON.exists(), reason='Supervisor not installed')
 
 
