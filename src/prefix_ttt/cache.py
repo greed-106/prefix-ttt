@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 import torch
 
+from prefix_ttt.ops import LOCAL_BLOCK_SIZE
+
 
 @dataclass
 class LayerState:
@@ -56,8 +58,9 @@ class HybridCache:
         if layer.key is not None:
             if layer.key.shape != layer.value.shape or layer.key.shape[0] != len(self.seen_tokens):
                 raise ValueError("KV shape mismatch")
-            if index not in self.full_attention_layers and layer.key.shape[1] > 32:
-                raise ValueError("Local KV capacity exceeds 32")
+            if (index not in self.full_attention_layers
+                    and layer.key.shape[1] > LOCAL_BLOCK_SIZE):
+                raise ValueError(f"Local KV capacity exceeds {LOCAL_BLOCK_SIZE}")
         previous = self.layers.get(index)
         protected = {}
         for name, value in vars(layer).items():

@@ -10,6 +10,7 @@ from transformers import CLIPImageProcessor, LlavaForConditionalGeneration
 
 from llava.conversation import conv_templates
 from llava.mm_utils import tokenizer_image_token
+from prefix_ttt.config import load_config
 from prefix_ttt.model.bridge import load_checkpoint, load_tokenizer
 from prefix_ttt.model.hybrid import install_prefix_ttt
 from prefix_ttt.model.trainability import install_lora
@@ -79,7 +80,7 @@ def main():
         torch.manual_seed(42)
         device = torch.device('cuda', 0)
         report['device'] = torch.cuda.get_device_name(device)
-        config = json.loads(Path(args.config).read_text())
+        config = load_config(args.config)
         path = Path(config['data_root']) / config['model_relative_path']
         tokenizer = load_tokenizer(path)
         processor = CLIPImageProcessor.from_pretrained(path, local_files_only=True)

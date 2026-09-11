@@ -4,7 +4,8 @@ from collections import Counter
 
 import pytest
 
-from prefix_ttt.manifests import build, digest_json, largest_remainder
+from prefix_ttt.digests import digest_json
+from prefix_ttt.manifests import build, largest_remainder
 
 
 def fixture(tmp_path, special=None):

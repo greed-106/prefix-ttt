@@ -11,6 +11,7 @@ def main():
     parser.add_argument('--tasks', default='mme,pope,gqa')
     parser.add_argument('--output-path', required=True)
     parser.add_argument('--limit', type=int)
+    parser.add_argument('--measure', help='optional per-request cost log (JSONL)')
     args = parser.parse_args()
     tasks = args.tasks.split(',')
     if not tasks or not set(tasks) <= {'mme', 'pope', 'gqa'} or len(set(tasks)) != len(tasks):
@@ -41,6 +42,8 @@ def main():
     model_args = f'pretrained={args.pretrained},conv_template=vicuna_v1'
     if args.checkpoint:
         model_args += f',checkpoint={args.checkpoint}'
+    if args.measure:
+        model_args += f',measure={args.measure}'
     tracker = EvaluationTracker(output_path=str(output))
     stamp = get_datetime_str(timezone='Asia/Shanghai')
     results = evaluator.simple_evaluate(model='prefix_ttt_llava', model_args=model_args,

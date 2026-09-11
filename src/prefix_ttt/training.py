@@ -7,8 +7,23 @@ import math
 import torch
 from torch.nn import functional as F
 
+from prefix_ttt.model.labels import IGNORE_INDEX
 
-def accumulation_steps(world_size, micro_batch_size, effective_batch_size=128):
+
+EFFECTIVE_BATCH_SIZE = 128   # every optimizer step spans this many samples
+
+NEW_MODULE_LR = 1e-4         # phase B: the Prefix-TTT parameters
+LORA_LR = 2e-5               # phase B: the LoRA adapters
+MATRIX_WEIGHT_DECAY = 0.01   # only on matrices, never on norms or gates
+WARMUP_FRACTION = 0.03
+GRAD_CLIP = 1.0
+ADAM_BETAS = (0.9, 0.95)
+ADAM_EPS = 1e-8
+ENERGY_EPS = 1e-6            # guards the normalised transfer diagnostic
+PILOT_MIN_SAMPLES = 50_000   # the pilot split of the fixed trajectory
+
+
+def accumulation_steps(world_size, micro_batch_size, effective_batch_size=EFFECTIVE_BATCH_SIZE):
     divisor = world_size * micro_batch_size
     if world_size <= 0 or micro_batch_size <= 0 or effective_batch_size % divisor:
         raise ValueError("effective batch must be divisible by positive world_size * micro_batch")
@@ -16,7 +31,7 @@ def accumulation_steps(world_size, micro_batch_size, effective_batch_size=128):
 
 
 def shifted_target_count(labels):
-    return int(labels[..., 1:].ne(-100).sum())
+    return int(labels[..., 1:].ne(IGNORE_INDEX).sum())
 
 
 def token_normalized_ce(logits, labels, global_target_count, world_size=1):
@@ -29,7 +44,7 @@ with zero targets contributes differentiable zero; an empty group is an error.
     if global_target_count <= 0 or world_size <= 0:
         raise ValueError("empty accumulation group or invalid world size")
     summed = F.cross_entropy(logits[..., :-1, :].float().reshape(-1, logits.shape[-1]),
-                             labels[..., 1:].reshape(-1), ignore_index=-100, reduction="sum")
+                             labels[..., 1:].reshape(-1), ignore_index=IGNORE_INDEX, reduction="sum")
     return summed * world_size / global_target_count
 
 
@@ -59,7 +74,8 @@ sample count, including the final short accumulation group.
     return result / modalities
 
 
-def trajectory(train_samples, effective_batch_size=128, pilot_min_samples=50000):
+def trajectory(train_samples, effective_batch_size=EFFECTIVE_BATCH_SIZE,
+               pilot_min_samples=PILOT_MIN_SAMPLES):
     if train_samples <= 0 or effective_batch_size <= 0:
         raise ValueError("positive training set and batch required")
     total = math.ceil(train_samples / effective_batch_size)
@@ -70,7 +86,7 @@ def trajectory(train_samples, effective_batch_size=128, pilot_min_samples=50000)
             "pilot_samples": min(pilot * effective_batch_size, train_samples)}
 
 
-def cosine_factor(step, total_steps, warmup_fraction=0.03):
+def cosine_factor(step, total_steps, warmup_fraction=WARMUP_FRACTION):
     """HF-style integer-ceil warmup, parameterized by FULL stage trajectory."""
     if total_steps <= 0 or not 0 <= warmup_fraction < 1:
         raise ValueError("invalid schedule")
@@ -96,8 +112,8 @@ def optimizer_groups(model, new_parameters=()):
             raise ValueError('Duplicate optimizer parameter')
         seen.add(id(parameter))
         kind = record['optimizer_group']
-        learning_rate = 1e-4 if kind == 'new_module' else 2e-5
-        decay = 0.01 if parameter.ndim >= 2 else 0.0
+        learning_rate = NEW_MODULE_LR if kind == 'new_module' else LORA_LR
+        decay = MATRIX_WEIGHT_DECAY if parameter.ndim >= 2 else 0.0
         key = (kind, decay)
         group = groups.setdefault(key, {'params': [], 'lr': learning_rate,
                                         'weight_decay': decay, 'name': kind})

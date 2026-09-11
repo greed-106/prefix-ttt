@@ -56,9 +56,9 @@ class TransformersHybridCache(Cache):
     def batch_select_indices(self, indices):
         self.reorder_cache(indices)
 
-    @property
-    def tensor_bytes(self):
-        return self.storage.tensor_bytes + self.valid_history.numel() * self.valid_history.element_size()
+
+# The hybrid path supports cached greedy single-beam decoding only.
+MAX_NEW_TOKENS, NUM_BEAMS, DO_SAMPLE = 128, 1, False
 
 
 def new_cache(model, batch_size, device):
@@ -69,8 +69,8 @@ def new_cache(model, batch_size, device):
 
 @torch.no_grad()
 def greedy_generate(model, inputs, *, images=None, image_sizes=None,
-                    attention_mask=None, max_new_tokens=128, num_beams=1,
-                    do_sample=False, use_cache=True, eos_token_id=None,
+                    attention_mask=None, max_new_tokens=MAX_NEW_TOKENS, num_beams=NUM_BEAMS,
+                    do_sample=DO_SAMPLE, use_cache=True, eos_token_id=None,
                     pad_token_id=None, temperature=None, top_p=None, **kwargs):
     """Greedy continuation IDs; prompt is expanded once, subsequent qlen is one."""
     if model.training:

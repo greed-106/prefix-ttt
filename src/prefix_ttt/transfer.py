@@ -2,67 +2,27 @@
 import argparse
 import json
 import math
-import os
 from pathlib import Path
-import random
-import socket
 import time
 
-import numpy as np
 import torch
 import torch.distributed as dist
 from torch import nn
 from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
 
-from prefix_ttt.data_pipeline import load_manifest, build_dataset, prepare_sample
-from prefix_ttt.manifests import digest_json
+from prefix_ttt.config import load_config
+from prefix_ttt.data_pipeline import (load_manifest, build_dataset, prepare_sample,
+                                      micro_batches, batch_loader)
+from prefix_ttt.digests import digest_json
+from prefix_ttt.runtime import (LATEST, SEED, distributed_context, gather_rng,
+                                restore_rng, save_atomic, seed_everything)
 from prefix_ttt.model.bridge import load_checkpoint, load_tokenizer
 from prefix_ttt.ops.features import FeatureReadout
 from prefix_ttt.ops.fla import fla_prefix
 from prefix_ttt.ops.local import local_attention
 from prefix_ttt.ops.reference import chunk_prefix
-from prefix_ttt.sft import rng_state, restore_rng, sample_group
-from prefix_ttt.training import accumulation_steps, cosine_factor, residual_transfer_loss
-
-
-def check_baselines(paths):
-    """Require complete native lmms outputs, without recomputing any metrics."""
-    required = {
-        'mme': (2374, ('mme_perception_score', 'mme_cognition_score')),
-        'pope': (9000, ('pope_accuracy', 'pope_precision', 'pope_recall',
-                        'pope_f1_score', 'pope_yes_ratio')),
-        'gqa': (12578, ('exact_match',)),
-    }
-    seen = set()
-    for path in paths:
-        files = list(Path(path).rglob('*_results.json'))
-        if len(files) != 1:
-            raise ValueError(f'Expected exactly one native lmms result in {path}')
-        result_path = files[0]
-        summary = json.loads(result_path.read_text())
-        tasks = set(summary.get('results', {}))
-        if len(tasks) != 1 or not tasks <= required.keys() or tasks & seen:
-            raise ValueError('E0 baseline requires distinct MME/POPE/GQA results')
-        task = next(iter(tasks))
-        count, metrics = required[task]
-        if ('limit' not in summary.get('config', {}) or summary['config']['limit'] is not None
-                or summary.get('n-samples', {}).get(task) != {'original': count, 'effective': count}):
-            raise ValueError(f'Incomplete or diagnostic E0 baseline: {task}')
-        for metric in metrics:
-            value = summary['results'][task].get(f'{metric},none')
-            if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
-                raise ValueError(f'Missing or nonfinite native metric: {task}/{metric}')
-        sample_path = result_path.with_name(result_path.name.removesuffix('_results.json')
-                                            + f'_samples_{task}.jsonl')
-        if not sample_path.is_file():
-            raise ValueError(f'Missing native sample log: {sample_path}')
-        with sample_path.open() as stream:
-            ids = [json.loads(line).get('doc_id') for line in stream]
-        if len(ids) != count or any(type(i) is not int for i in ids) or set(ids) != set(range(count)):
-            raise ValueError(f'Incomplete or duplicate native sample log: {task}')
-        seen.add(task)
-    if seen != required.keys():
-        raise ValueError('E0 baseline requires MME/POPE/GQA results')
+from prefix_ttt.training import (EFFECTIVE_BATCH_SIZE, GRAD_CLIP, accumulation_steps,
+                                 cosine_factor, residual_transfer_loss)
 
 
 class TransferHooks:
@@ -121,13 +81,19 @@ class TransferHooks:
                 errors = (readout.float() - (full - local).float()).square().mean((-1, -2))
                 energy = full.float().square().mean((-1, -2))
                 values = [loss.detach() * self.denominator]
+                # Average per sample first, then over samples, so the logged sums
+                # do not depend on how samples are grouped into micro-batches.
+                samples = torch.tensor(errors.shape[0], dtype=torch.float32, device=errors.device)
                 for mask in (self.visual & self.valid, ~self.visual & self.valid):
-                    count = mask.sum().clamp_min(1)
-                    raw = (errors * mask).sum() / count
-                    normalized = raw / ((energy * mask).sum() / count + 1e-6)
-                    values.extend([raw, normalized, mask.any().float()])
+                    tokens = mask.sum(1).clamp_min(1)
+                    present = mask.any(1)
+                    raw = (errors * mask).sum(1) / tokens
+                    normalized = raw / ((energy * mask).sum(1) / tokens + 1e-6)
+                    values.extend([(raw * present).sum(), (normalized * present).sum(),
+                                   present.sum().float()])
                 gate = torch.nn.functional.linear(x, branch.gate_weight).float()
-                values.extend([gate.square().mean().sqrt(), state.detach().float().square().mean().sqrt()])
+                values.extend([gate.square().mean().sqrt() * samples,
+                               state.detach().float().square().mean().sqrt() * samples])
                 value = torch.stack(values)
                 self.diagnostics[key] = self.diagnostics.get(key, torch.zeros_like(value)) + value
             # None is essential: original full attention goes through original o_proj.
@@ -143,39 +109,26 @@ def main():
     parser.add_argument('--config', default='configs/base.json')
     parser.add_argument('--manifest', default='artifacts/cpu/fixed_manifest.json')
     parser.add_argument('--output', required=True)
-    parser.add_argument('--require-baseline', nargs=3, required=True)
     parser.add_argument('--resume')
     parser.add_argument('--max-steps', type=int)
     parser.add_argument('--save-every', type=int, default=25)
     args = parser.parse_args()
     if args.save_every <= 0 or (args.max_steps is not None and args.max_steps <= 0):
         parser.error('Step limits must be positive')
-    check_baselines(args.require_baseline)
-    rank, world = int(os.environ.get('RANK', 0)), int(os.environ.get('WORLD_SIZE', 1))
-    local_rank = int(os.environ.get('LOCAL_RANK', 0))
-    accumulation_steps(world, 1)
-    if not torch.cuda.is_available():
-        raise RuntimeError('Phase A requires validated CUDA/FLA')
-    torch.cuda.set_device(local_rank)
-    device = torch.device('cuda', local_rank)
-    if world > 1:
-        dist.init_process_group('nccl', device_id=device)
-        print(json.dumps({'host': socket.gethostname(), 'rank': rank, 'world_size': world,
-                          'local_rank': local_rank,
-                          'device': torch.cuda.get_device_name(local_rank)}), flush=True)
+    config = load_config(args.config)
+    rank, world, device = distributed_context('Phase A')
+    micro = int(config['training']['micro_batch_size'])
+    batches_per_step = accumulation_steps(world, micro)
     hooks = None
     try:
-        random.seed(42)
-        np.random.seed(42)
-        torch.manual_seed(42)
-        config = json.loads(Path(args.config).read_text())
+        seed_everything(SEED)
         manifest, sha = load_manifest(args.manifest, config['data_root'])
-        total_steps = math.ceil(len(manifest['A']) / 128)
+        total_steps = math.ceil(len(manifest['A']) / EFFECTIVE_BATCH_SIZE)
         identity = dict(stage='A', manifest_sha256=sha, config_sha256=digest_json(config),
                         total_steps=total_steps, diagnostic_only=args.max_steps is not None)
         output = Path(args.output)
         output.mkdir(parents=True, exist_ok=True)
-        if not args.resume and (output / 'latest.pt').exists():
+        if not args.resume and (output / LATEST).exists():
             raise ValueError('Existing phase A requires explicit resume')
         path = Path(config['data_root']) / config['model_relative_path']
         teacher, _ = load_checkpoint(path, dtype=torch.bfloat16)
@@ -198,7 +151,7 @@ def main():
             optimizer.load_state_dict(checkpoint['optimizer'])
             scheduler.load_state_dict(checkpoint['scheduler'])
             cursor, step = checkpoint['samples_seen'], checkpoint['global_step']
-            if cursor != min(step * 128, len(manifest['A'])):
+            if cursor != min(step * EFFECTIVE_BATCH_SIZE, len(manifest['A'])):
                 raise ValueError('Invalid phase-A cursor')
             restore_rng(checkpoint['rng_by_rank'][rank])
             del checkpoint
@@ -207,32 +160,30 @@ def main():
             (output / 'run.json').write_text(json.dumps({**identity, 'world_size': world, 'argv': vars(args), 'config': config}, indent=2))
 
         def save():
-            states = [None] * world if rank == 0 else None
-            if world > 1:
-                dist.gather_object(rng_state(), states, dst=0)
-            else:
-                states = [rng_state()]
+            states = gather_rng(rank, world)
             if rank == 0:
-                checkpoint = {**identity, 'world_size': world, 'complete': cursor == len(manifest['A']),
+                save_atomic(output / LATEST, {
+                    **identity, 'world_size': world, 'complete': cursor == len(manifest['A']),
                     'global_step': step, 'samples_seen': cursor, 'rng_by_rank': states,
                     'features': {key: {name: p.detach().cpu() for name, p in branch.state_dict().items()}
                                  for key, branch in branches.items()},
-                    'optimizer': optimizer.state_dict(), 'scheduler': scheduler.state_dict()}
-                temporary = output / 'latest.pt.tmp'
-                torch.save(checkpoint, temporary)
-                temporary.replace(output / 'latest.pt')
+                    'optimizer': optimizer.state_dict(), 'scheduler': scheduler.state_dict()})
             if world > 1:
                 dist.barrier()
 
         stop = min(total_steps, args.max_steps) if args.max_steps is not None else total_steps
+        index_batches = [batch for start in range(cursor, len(manifest['A']), EFFECTIVE_BATCH_SIZE)
+                         for batch in micro_batches(manifest['A'], start, rank, world, micro)]
+        stream = iter(batch_loader(dataset, collate, index_batches,
+                                   int(config['training'].get('dataloader_workers', 0))))
         while step < stop:
             started = time.perf_counter()
             torch.cuda.reset_peak_memory_stats()
             optimizer.zero_grad(set_to_none=True)
-            hooks.denominator = min(128, len(manifest['A']) - cursor)
+            hooks.denominator = min(EFFECTIVE_BATCH_SIZE, len(manifest['A']) - cursor)
             hooks.diagnostics.clear()
-            for index in sample_group(manifest['A'], cursor, rank, world):
-                staged, metadata = prepare_sample(teacher, dataset, collate, index, device)
+            for batch in [next(stream) for _ in range(batches_per_step)]:
+                staged, metadata = prepare_sample(teacher, batch, device)
                 inputs = {key: value.to(device) for key, value in staged.items()
                           if key not in ('labels', 'prefix_valid_mask')}
                 hooks.valid = metadata['valid_mask'].to(device)
@@ -248,7 +199,7 @@ def main():
                         dist.all_reduce(parameter.grad)
                     if not torch.isfinite(parameter.grad).all():
                         raise FloatingPointError('Nonfinite phase-A gradient')
-                norm = torch.nn.utils.clip_grad_norm_(branch.parameters(), 1.0)
+                norm = torch.nn.utils.clip_grad_norm_(branch.parameters(), GRAD_CLIP)
                 values = hooks.diagnostics[key]
                 if world > 1:
                     dist.all_reduce(values)

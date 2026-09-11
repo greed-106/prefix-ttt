@@ -2,8 +2,7 @@
 
 import torch
 
-
-FLA_COMMIT = "c51953382397da5c3b7b8a41e568915b703e2934"
+from prefix_ttt.ops import ETA, TILE_SIZE
 
 
 def _pack(q, k, v, valid):
@@ -18,20 +17,21 @@ def _pack(q, k, v, valid):
 
 def _run_kernel(q, k, v, state, need_final_state, tile_size, cu_seqlens):
     try:
-        if tile_size == 64:
+        if tile_size == TILE_SIZE:
             from fla.ops.linear_attn import chunk_linear_attn
-            return chunk_linear_attn(q=q, k=k, v=v / 128.0, scale=1.0,
+            return chunk_linear_attn(q=q, k=k, v=v * ETA, scale=1.0,
                                      initial_state=state, output_final_state=need_final_state,
                                      normalize=False, cu_seqlens=cu_seqlens)
         from fla.ops.simple_gla import chunk_simple_gla
-        return chunk_simple_gla(q=q, k=k, v=v / 128.0, g=None, g_gamma=None,
+        return chunk_simple_gla(q=q, k=k, v=v * ETA, g=None, g_gamma=None,
                                 scale=1.0, initial_state=state, output_final_state=need_final_state,
                                 cu_seqlens=cu_seqlens, chunk_size=tile_size)
     except ImportError as exc:
         raise RuntimeError("locked FLA backend is unavailable; no fallback is permitted") from exc
 
 
-def fla_prefix(q, k, v, initial_state=None, need_final_state=True, valid=None, tile_size=64):
+def fla_prefix(q, k, v, initial_state=None, need_final_state=True, valid=None,
+               tile_size=TILE_SIZE):
     """FLA prefill, padded independent rows unpacked through cu_seqlens."""
     if not q.is_cuda:
         raise RuntimeError("FLA Prefix-TTT requires a CUDA GPU; CPU/reference only is not GPU validation")
@@ -81,6 +81,7 @@ def recurrent_step(q, k, v, initial_state=None, valid=None):
     with torch.autocast(device_type=q.device.type, enabled=False):
         mask = valid[..., None, None]
         qf, kf, vf = (x.float().masked_fill(~mask, 0) for x in (q, k, v))
-        state = initial_state + torch.einsum("bhr,bhd->bhrd", kf[:, 0], vf[:, 0]) / 128.0
+        state = initial_state + torch.einsum("bhr,bhd->bhrd", kf[:, 0], vf[:, 0]) * ETA
         out = torch.einsum("bhr,bhrd->bhd", qf[:, 0], state).unsqueeze(1)
     return out.to(q.dtype), state
+

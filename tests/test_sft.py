@@ -2,16 +2,8 @@ import torch
 import pytest
 
 
-from prefix_ttt.sft import sample_group, rng_state, restore_rng, load_trainable
+from prefix_ttt.runtime import load_trainable, restore_rng, rng_state
 from prefix_ttt.training import cosine_factor, token_normalized_ce
-
-
-def test_order_partial_rank_partition():
-    order = list(range(133))
-    for cursor in (0, 128):
-        partitions = [sample_group(order, cursor, rank, 4) for rank in range(4)]
-        assert sorted(sum(partitions, [])) == order[cursor:cursor + 128]
-        assert sum(map(len, partitions)) == len(set(sum(partitions, [])))
 
 
 def test_summed_rank_gradients_equal_global_token_mean():

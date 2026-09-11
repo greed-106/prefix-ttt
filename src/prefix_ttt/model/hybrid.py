@@ -4,10 +4,13 @@ from torch import nn
 from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
 
 from prefix_ttt.ops.features import FeatureReadout
-from prefix_ttt.ops.local import local_attention, local_attention_cached, LocalCache
+from prefix_ttt.ops import TILE_SIZE
+from prefix_ttt.ops.local import (local_attention, local_attention_cached,
+                                 local_attention_decode, LocalCache)
 from prefix_ttt.ops.reference import chunk_prefix
 from prefix_ttt.ops.fla import fla_prefix, recurrent_step
 from prefix_ttt.cache import LayerState
+from prefix_ttt.runtime import SEED
 from prefix_ttt.model.generation import TransformersHybridCache
 
 
@@ -15,7 +18,7 @@ FULL_ATTENTION_LAYERS = (0, 3, 7, 11, 15, 19, 23, 27, 31)
 
 
 class PrefixTTTAttention(nn.Module):
-    def __init__(self, original, *, backend, seed=42, tile_size=64):
+    def __init__(self, original, *, backend, seed=SEED, tile_size=TILE_SIZE):
         super().__init__()
         if backend not in ('reference', 'fla'):
             raise ValueError('Select reference or fla explicitly')
@@ -63,7 +66,9 @@ class PrefixTTTAttention(nn.Module):
             valid = past_key_value.current_valid
             local_cache = None if old is None else LocalCache(old.key, old.value,
                 old.local_position, past_key_value.storage.seen_tokens)
-            local, final_local = local_attention_cached(q, k, v, valid, local_cache)
+            local, final_local = (local_attention_decode(q, k, v, valid, local_cache)
+                                  if t == 1 and local_cache is not None
+                                  else local_attention_cached(q, k, v, valid, local_cache))
         else:
             local = local_attention(q, k, v, valid)
         # New parameters remain FP32 masters. Inference cannot rely on the
@@ -91,7 +96,7 @@ class PrefixTTTAttention(nn.Module):
 
 
 def install_prefix_ttt(model, *, backend, full_attention_layers=FULL_ATTENTION_LAYERS,
-                       seed=42, tile_size=64):
+                       seed=SEED, tile_size=TILE_SIZE):
     layers = model.get_model().layers
     anchors = set(full_attention_layers)
     if any(i < 0 or i >= len(layers) for i in anchors):

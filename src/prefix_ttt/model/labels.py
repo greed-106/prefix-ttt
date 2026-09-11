@@ -1,4 +1,8 @@
-"""Classify missing supervision without silently dropping preprocessing failures."""
+"""Label semantics: the ignored-target sentinel and supervision classification."""
+
+# Must stay equal to llava.constants.IGNORE_INDEX; kept here so the loss, the data
+# pipeline and the audits share one name without importing the LLaVA package.
+IGNORE_INDEX = -100
 
 
 class LabelPreprocessingError(ValueError):

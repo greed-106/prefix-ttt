@@ -17,7 +17,11 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8,<9", "pypdf>=6,<7"]
+dev = [
+    "pytest>=8,<9",
+    "pypdf>=6,<7",
+    "matplotlib>=3.10.9",
+]
 eval = ["lmms-eval==0.7.2", "datasets==4.0.0"]
 
 [tool.setuptools.packages.find]

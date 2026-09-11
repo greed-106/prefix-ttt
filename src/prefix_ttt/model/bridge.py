@@ -7,6 +7,18 @@ from torch import nn
 from transformers import CLIPImageProcessor, CLIPVisionConfig, CLIPVisionModel
 
 
+# Expanded sequence cap of the pinned checkpoint: 576 image tokens plus text.
+# The data pipeline enforces the same bound; the audit buckets are a separate
+# decision (see manifests.LENGTH_BUCKET_BOUNDS).
+MAX_EXPANDED_LENGTH = 2048
+
+# Shape of the pinned production checkpoint. This is an identity assertion about one
+# artifact, not a tunable: it must fail if a different model is supplied.
+PINNED_LAYERS, PINNED_HIDDEN, PINNED_HEADS, PINNED_HEAD_DIM = 32, 4096, 32, 128
+PINNED_SHAPE = (PINNED_LAYERS, PINNED_HIDDEN, PINNED_HEADS, PINNED_HEAD_DIM)
+IMAGE_ASPECT_RATIO = 'square'
+
+
 class EmbeddedCLIPVisionTower(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -54,7 +66,7 @@ def bridge_config(hf_config, *, validate_production=True):
     if validate_production:
         actual = (config.num_hidden_layers, config.hidden_size,
                   config.num_attention_heads, config.hidden_size // config.num_attention_heads)
-        if actual != (32, 4096, 32, 128):
+        if actual != PINNED_SHAPE:
             raise ValueError(f'Checkpoint architecture mismatch: {actual}')
         if config.vocab_size != 32064:
             raise ValueError('Expected all 32064 embedding/lm_head rows')
@@ -68,8 +80,8 @@ def bridge_config(hf_config, *, validate_production=True):
     if hf_config.get('projector_hidden_act', 'gelu') != 'gelu':
         raise ValueError('Projector activation mismatch')
     config.mm_patch_merge_type = 'flat'
-    config.image_aspect_ratio = 'square'
-    config.tokenizer_model_max_length = 2048
+    config.image_aspect_ratio = IMAGE_ASPECT_RATIO
+    config.tokenizer_model_max_length = MAX_EXPANDED_LENGTH
     config.tokenizer_padding_side = 'right'
     config.tie_word_embeddings = False
     config.pad_token_id = hf_config.get('pad_token_id')
@@ -141,43 +153,8 @@ def load_tokenizer(path):
     """Keep local tokenizer semantics and all model rows; never resize embeddings."""
     from transformers import LlamaTokenizer
     tokenizer = LlamaTokenizer.from_pretrained(path, local_files_only=True,
-                                               model_max_length=2048, padding_side='right')
+                                               model_max_length=MAX_EXPANDED_LENGTH, padding_side='right')
     if tokenizer.pad_token_id is None:
         raise ValueError('Checkpoint tokenizer must define its padding token')
     return tokenizer
 
-
-def audit_checkpoint_headers(path):
-    """Check the real 7B schema without loading weights or running a forward."""
-    from accelerate import init_empty_weights
-    from safetensors import safe_open
-    from llava.model.language_model.llava_llama import LlavaLlamaForCausalLM
-    path = Path(path)
-    config = bridge_config(json.loads((path / 'config.json').read_text()))
-    with init_empty_weights():
-        model = LlavaLlamaForCausalLM(config)
-    expected = {name: tuple(tensor.shape) for name, tensor in model.state_dict().items()}
-    index = json.loads((path / 'model.safetensors.index.json').read_text())
-    seen, parameters, byte_count = set(), 0, 0
-    element_bytes = {'F16': 2, 'BF16': 2, 'F32': 4, 'I64': 8}
-    for name in sorted(set(index['weight_map'].values())):
-        with safe_open(path / name, framework='pt', device='cpu') as shard:
-            for key in shard.keys():
-                if index['weight_map'].get(key) != name:
-                    raise ValueError(f'Index shard mismatch: {key}')
-                target = map_checkpoint_key(key)
-                view = shard.get_slice(key)
-                shape = tuple(view.get_shape())
-                if target in seen or expected.get(target) != shape:
-                    raise ValueError(f'Duplicate or shape mismatch: {target}')
-                seen.add(target)
-                count = 1
-                for size in shape:
-                    count *= size
-                parameters += count
-                byte_count += count * element_bytes[view.get_dtype()]
-    if seen != set(expected) or len(seen) != len(index['weight_map']):
-        raise ValueError('Checkpoint coverage mismatch')
-    return dict(tensor_count=len(seen), parameters=parameters, tensor_bytes=byte_count,
-                embedding_rows=config.vocab_size, missing=[], unexpected=[],
-                execution='safetensors headers and meta model only; no full forward')

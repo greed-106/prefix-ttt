@@ -3,7 +3,8 @@ import torch
 import torch.nn.functional as F
 
 from prefix_ttt.ops.reference import chunk_prefix, sequential_prefix
-from prefix_ttt.ops.local import local_attention, local_attention_cached
+from prefix_ttt.ops.local import (local_attention, local_attention_cached,
+                                 local_attention_decode)
 from prefix_ttt.ops.features import FeatureReadout
 from prefix_ttt.ops.fla import fla_prefix, recurrent_step, _pack
 
@@ -268,3 +269,36 @@ def test_fla_gpu_varlen_output_state_and_gradients(tile):
     for a, e in zip(*gradients):
         error = (a.float() - e.float()).norm() / e.float().norm().clamp_min(1e-8)
         assert error < 0.05, (tile, error.item(), (a.float() - e.float()).abs().max().item())
+
+
+def test_cached_local_attention_decode_matches_the_packed_path():
+    """The decode fast path must see exactly the packed path's tokens."""
+    torch.manual_seed(0)
+    batch, heads, head_dim, steps = 2, 2, 4, 90
+    q, k, v = (torch.randn(batch, steps, heads, head_dim) for _ in range(3))
+    valid = torch.ones(batch, steps, dtype=torch.bool)
+    valid[1, 20:25] = False                      # a hole that outlives a block boundary
+    packed_cache = fast_cache = None
+    for step in range(steps):
+        window = slice(step, step + 1)
+        packed_out, packed_cache = local_attention_cached(
+            q[:, window], k[:, window], v[:, window], valid[:, window], packed_cache)
+        if step == 0:
+            _, fast_cache = local_attention_cached(
+                q[:, window], k[:, window], v[:, window], valid[:, window], None)
+            continue
+        fast_out, fast_cache = local_attention_decode(
+            q[:, window], k[:, window], v[:, window], valid[:, window], fast_cache)
+        # The packed path returns zeros for rows that are invalid at this step and the
+        # caller masks those rows anyway, so only valid rows carry information.
+        keep = valid[:, step]
+        torch.testing.assert_close(packed_out[keep], fast_out[keep], rtol=1e-4, atol=1e-5)
+        torch.testing.assert_close(packed_cache.lengths, fast_cache.lengths, rtol=0, atol=0)
+        torch.testing.assert_close(packed_cache.seen_tokens, fast_cache.seen_tokens, rtol=0, atol=0)
+        for row in range(batch):
+            length = int(packed_cache.lengths[row])
+            if length:
+                torch.testing.assert_close(packed_cache.key[row, :length],
+                                           fast_cache.key[row, :length], rtol=0, atol=0)
+                torch.testing.assert_close(packed_cache.value[row, :length],
+                                           fast_cache.value[row, :length], rtol=0, atol=0)

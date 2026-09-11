@@ -1,8 +1,8 @@
 """Derive v1 assistant spans from original rendered prefixes, not round offsets."""
 import torch
-from llava.constants import IGNORE_INDEX
 from llava.mm_utils import tokenizer_image_token
-from .labels import LabelPreprocessingError
+
+from .labels import IGNORE_INDEX, LabelPreprocessingError
 
 
 def v1_targets(conversation, tokenizer, input_ids, *, has_image):

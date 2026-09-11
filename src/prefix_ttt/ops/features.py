@@ -6,7 +6,10 @@ from torch import nn
 import torch.nn.functional as F
 
 
-def rms_no_affine(x, eps=1e-6):
+RMS_EPS = 1e-6
+
+
+def rms_no_affine(x, eps=RMS_EPS):
     stats = x.double() if x.dtype == torch.float64 else x.float()
     return (stats * torch.rsqrt(stats.square().mean(-1, keepdim=True) + eps)).to(x.dtype)
 

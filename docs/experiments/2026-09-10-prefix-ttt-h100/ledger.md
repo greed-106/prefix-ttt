@@ -6,7 +6,17 @@
 
 ## 当前状态
 
-本容器 Python 环境已按 `pyproject.toml` / `uv.lock` 安装并验证通过，GPU 算子验收 17 项通过。`data/llava-v1.5-assets-v1/`（69G）与 A40 迁移副本 `artifacts/migrations/from-a40-20260910-step1075/` 已于 2026-09-10 20:24–20:36 到位并完成哈希/数量校验（见「迁移资产到位与校验」）。仍缺：`preference/` 参考仓库、Supervisor（持久托管）、本机 GPU 授权与 `configs/` 更新。按迁移指南，当前代码**不能不经适配**直接在 8 卡上恢复 E2 训练。
+最后更新 2026-09-11 14:40。
+
+- 环境：按 `pyproject.toml` / `uv.lock` 安装并锁定，GPU 算子验收 17 项通过；两台 H100 主机（`cucloud-server3` / `h100-1`）通过宿主机 NFS 共享 `/data/shared/weights/prefix-ttt`，多机 NCCL/RDMA 已实测。
+- 训练：已放弃 A40 迁移方案，改为按任务书在本机重训。A 阶段 391 步与 B/E2 阶段 5182 步（16 卡跨两机，micro_batch 8，全局 batch 128）均已完成，`complete=true`；权重在 `/data/shared/weights/prefix-ttt/training/{A,E2}`。
+- 推理口径：**LoRA 在加载后于内存中一次性合并进基座权重，这是唯一的推理路径**（运行时开关与对照代码已删除）；训练侧 LoRA 仍与基座分开，checkpoint 保留原始适配器，不提供导出合并权重的接口。
+- 性能优化：① LoRA 合并（TPOT ×1.33）与 ③ Local-32 decode 专用路径（×1.24）已落地，合计 TPOT ×1.74 / kernel 数 −43%；② torch.compile 融合与 ④ FLA fused recurrent 经实测为负收益，已回退（详见 2026-09-11 两条记录）。
+- 评测：E0（基座）与 E2 的 MME、POPE 官方分数已产出；E2 采用合并口径后为 MME 1429.4893 / 278.2143、POPE 0.8501 / 0.8357；E2 GQA 经用户决定不跑，E1 不跑。带内打点的跑批共 22748 条逐请求记录，另有优化后的对照跑批。
+- 工程质量：已完成一轮审计与重构（分层、常量单点化、配方校验），CPU 167 passed / GPU 17 passed；重构经逐样本比对确认零行为变化。
+- 产出：`experiment_summary.md`（阶段总结）、`metrics-summary.json`、`images/`（三张图，已按最终口径重绘）、`scripts/`（评测、绘图、对照脚本）。
+- 待办：本地改动尚未提交（用户未授权）；`gpu_smoke.py`/`scheduler.py`/两个诊断模块的去留、`transfer.py` 手抄前向的收敛、`configs/base.json` 33 个装饰键的最终处理方式，均待用户决定。
+- 仍缺：`preference/` 参考仓库（不影响训练与评测入口）。
 
 ## 2026-09-10 环境重建与验证（本账本首条）
 
@@ -328,3 +338,269 @@
   - 分支 3 的占用保护：用临时目录（内含一个文件）替换 `SHARE` 后运行，脚本以退出码 1 报 `already holds local data; mounting over it would hide that data`，`mountpoint` 确认未挂载、原文件完好。
   - 分支 1 与正常的客户端挂载路径需在 h100-1 上实测（该机 sudo 需密码）。
 - 未做：未提交、未推送；未在 h100-1 执行任何 sudo 操作。
+
+## 2026-09-10 多机支持提交并同步到 h100-1
+
+- 本机提交 `49acbe2`（作者 `Codex <codex@openai.com>`，7 文件 +194/−10），内容：多机 `device_id` 绑定与启动日志、`scripts/` 三个脚本、账本（含 NCCL/RDMA 实测与"本机是裸金属而非容器"的更正）。已推送，远端 `refs/heads/h100` = `49acbe2`。
+- h100-1 同步：该机原在 `main` @ `c8501f7`，且带有此前 rsync 产生的 3 个已修改文件与未跟踪的脚本目录。处理方式：`git checkout -- src/prefix_ttt/` 丢弃本地改动、`rm -rf docs/experiments/2026-09-10-prefix-ttt-h100`（提交中已包含）→ `git fetch origin && git checkout -B h100 origin/h100`。现该机位于 `h100` @ `49acbe2`，工作树干净。
+- 一致性校验：两端 `sft.py`、`transfer.py`、`gpu_communication.py` 与三个脚本的 SHA256 完全相同；脚本在 h100-1 上保留可执行位（`rwxrwxr-x`）。
+- 写入路径与解析的关系（澄清）：训练写的是**挂载后的本地路径**，NFS 客户端在挂载时已完成解析，写入过程不再涉及名字解析或 IP；仍需解析的只有两处一次性动作——挂载时的 `h100-3:<SHARE>` 与 `torchrun --master_addr=h100-3`。两者都由脚本写入的 `/etc/hosts` 满足。
+- 待办：在 h100-1 以 sudo 运行 `nfs-client-setup.sh` 完成挂载（该机 sudo 需密码）；随后由本机核实探针文件可见性与属主、跨机写入吞吐。
+
+## 2026-09-10 共享存储联通性验证（h100-1 已挂载，全部通过）
+
+- 用户在 h100-1 以 sudo 执行 `nfs-client-setup.sh`：输出 `mounted h100-3:/data/shared/weights/prefix-ttt at /data/shared/weights/prefix-ttt`；`findmnt` 显示 `nfs4 rw,relatime`；探针 `.probe-cucloud-server1` 写入成功。
+- server3 侧验证结果：
+  - **双向可见**：h100-1 创建的探针在 server3 可见；server3 创建的文件在 h100-1 可见。
+  - **`all_squash` 生效**：h100-1 创建的 `.probe-cucloud-server1` 与 2GB 测试文件在 server3 上属主均为 `mjyang:fastwam`（uid 1001），与客户端自身 uid 无关。
+  - **squash 语义严格**：用 `sudo` 在 server3 创建的文件属主为 `root:fastwam`，h100-1 经 NFS **读取被拒**（客户端凭据被映射为 1001:1002，既非 owner 也不在 `fastwam` 组）。结论：**共享目录中的文件必须由 `mjyang` 创建，不得用 sudo 写入**；训练以 mjyang 身份运行，符合该要求。
+  - **吞吐**：h100-1 → server3 写入 **837 MB/s**（2GB/2.57s）、读取 **1.1 GB/s**（server3 侧 `drop_caches` 后）；server3 本地写入对照 **1.7 GB/s**。按 1.3GB checkpoint 估算，跨机写入约 1.6s。
+  - **原子性**：从 h100-1 执行「写 `.tmp` + rename」成功，server3 侧只出现最终文件、无 `.tmp` 残留——与 `sft.py` 的保存路径一致，可安全用于 checkpoint 落盘。
+- 清理：删除 root 属主的测试残留与 dd 测试文件；共享目录现仅保留 `.probe-cucloud-server1` 与 `training/` 目录（均为 mjyang 属主）。
+- 未做：h100-1 未加载 `nvidia_peermem`（GDR 目前仅 server3 侧生效）；本次账本更新未提交。
+
+## 2026-09-10 两端启用 GDR 后的 RDMA 复测（更正此前的判断）
+
+- 用户已在 h100-1 执行 `sudo modprobe nvidia_peermem`；两端现均为已加载状态（server3 与 h100-1）。
+- 16 卡（8+8）复测结果：
+  - 通道：两端各 8 个 IB 设备、每个 32 条通道，**全部为 `NET/IB/.../GDRDMA`**（此前仅 server3 侧为 GDRDMA，h100-1 侧为 `NET/IB/nn` 无 GDR）。
+  - 正确性：两端全部 rank `sum=136.0`（=16×17/2），退出码 0。
+  - 时延：64MiB all-reduce **0.533–0.568 ms**，此前（仅单端 GDR）为 1.677–1.721 ms，**提升约 3 倍**。
+- **更正**：此前记录"GDR 不改变时延、主要节省 CPU 与主机内存带宽"，其依据是只启用单端 GPR 的测量，属不公平对比。双端启用后时延下降约 3 倍，该结论作废。按 64MiB/0.54ms 估算的有效聚合带宽约 230 GB/s，与单节点 8 个 IB HCA 多轨并行相符。
+- 与训练的关联：B 阶段每步梯度 all-reduce 的通信开销本已相对 8s 级步时可忽略，此提升进一步压缩通信占比；跨机扩展的瓶颈现在更可能在数据加载与计算，而非网络。
+
+## 2026-09-10 多机训练 smoke 通过（16 卡，E1 layout）
+
+- 命令：两端各执行 `scripts/run_multinode.sh <0|1> prefix_ttt.sft --config configs/base.json --manifest artifacts/cpu/fixed_manifest.json --layout E1 --output /data/shared/weights/prefix-ttt/training/E1-smoke --max-steps 2 --save-every 1`。选 E1（仅 LoRA）是因为 `transfer.py` 的 E0 基线门槛尚未满足（见下节）。
+- 结果：两端退出码 0；rank→主机映射正确（ranks 0–7 = `cucloud-server3`，8–15 = `cucloud-server1`，world_size=16）；训练 2 步：step1 loss 0.700951、grad_norm 0.081375、5.59s；step2 loss 0.581590、grad_norm 0.080431、4.14s；梯度与 loss 全部有限。
+- 产物（写在共享 NFS，属主 mjyang）：`latest.pt` 960207747 B、`result.json`、`run.json`、`steps.jsonl`、`trainable_params.json`。
+- 保存/重载验证：CPU 加载 `latest.pt` 成功，`layout=E1`、`world_size=16`、`global_step=2`、`samples_seen=256`、`trainable` 448 张量（E1 无 TTT，与 E2 的 448 LoRA + 69 TTT = 517 一致）、`optimizer.state` 448、`rng_by_rank` **16 份**、`diagnostic_only=True`（`--max-steps` 所致，符合预期）。`run.json` 记录 world_size=16、total_steps=5182。
+- 结论：多机 rendezvous、数据管线、跨机梯度 all_reduce、共享存储落盘与重载**全部可用**，多机训练机制已验证。
+
+## 2026-09-10 训练进程的 RDMA/GPU-Direct 实测与效率诊断
+
+- 用户提问：正在跑的 A 训练是否真的走 RDMA、是否 GPU Direct。在运行中的进程上直接取证（非微基准）：
+  - **RDMA 在用**：每个 rank 进程持有 **22 个 `/dev/infiniband/*` verbs 句柄**；IB 端口计数器显示真实流量（mlx5_0 单设备 15s 内约 127 MB 量级，8 个 rail 同时活跃）；**TCP 字节计数在 3s 与 20s 采样中完全不变**（3604/3620 → 3604/3620），说明节点间 TCP 只承担 rendezvous/控制面，**数据不走 TCP**。
+  - **GPU Direct 在用**：训练期间 `nvidia_peermem` 引用计数为 **721**（GPU 显存已注册供 peer DMA），与此前 NCCL 日志中的 `NET/IB/.../GDRDMA` 一致。
+  - 计数器单位已校准：`port_xmit_data` 为 4 字节单位（由字节增量/包增量≈461 与 MTU 4096 反推，平均包约 1.8 KB）。流量呈**突发**特征（每步末尾集中 all_reduce），短窗口采样波动大，早期 20s 采样低估了实际值。
+- 效率诊断（用户观察到"每卡功耗不到 300W，远低于 700W TDP"）：
+  - 实测：SM 利用率 38–58%、显存带宽利用率 10–18%、功耗 233–274 W、显存占用约 20 GB/80 GB；**每个 rank 进程恰好占用约 1 个 CPU 核（101–105%）**。
+  - 结论：瓶颈不在网络、也不在卡数，而在**串行且单线程的数据预处理**——`prepare_sample` 在训练循环内逐个样本同步执行（图像解码/缩放、tokenize、多模态展开），期间 GPU 空转；且 `micro_batch_size` 被代码硬编码为 1（`accumulation_steps(world, 1)`，config 中的该字段从未被读取），每步每卡仅 8 个样本、逐个前向反传，kernel 小、启动开销占比高。
+  - A 阶段整体仍很快：391 步约 12 分钟（旧机 4×A40 为 80.9 分钟）；但 B 阶段 5182 步在此效率下会显著拉长，值得先优化。
+- 可选的优化方向（尚未实施）：① 数据预取/重叠（把样本准备移到后台线程或 DataLoader worker，与 GPU 计算重叠）——不改变数学与协议，安全性最高；② `micro_batch>1`——利用率提升最大，但需改数据路径且偏离任务书的 micro=1 协议，影响与既有 E1/E2 设计的可比性；③ 用两个独立 8 卡作业替代一个 16 卡作业——单卡效率更高，但单条轨迹墙钟更慢；④ 允许 CPU 侧多线程（当前 `OMP_NUM_THREADS=1`）以加速图像预处理，代价小、可快速试。
+
+## 2026-09-10 micro_batch 与数据预取的审计（未实施改动）
+
+- **现状**：`configs/base.json` 的 `training.micro_batch_size` 是**死字段**——全代码仅 `accumulation_steps(world, 1)` 出现，micro 被硬编码为 1（grep 确认无其他读取点）。每步每卡样本数由 `sample_group(order, cursor, rank, world)` = 128/world 决定（16 卡时 8 个）。
+- **对 Prefix-TTT 正确性的影响：目标函数与 micro 分组无关**。
+  - B 阶段：`token_normalized_ce` 返回 `Σ_micro CE / T_global`（调用处不传 world_size，故因子为 1），梯度经手动 `all_reduce` SUM 聚合 → 等价于全局 token 均值梯度。8 个样本拆成 8×micro1 或 4×micro2，总和相同。
+  - A 阶段：`residual_transfer_loss(...).sum() / self.denominator`（denominator=128 全局样本数）→ 全局样本均值，同样与分组无关。
+  - `clip_grad_norm_` 在 all_reduce 之后每步执行一次，不受分组影响。
+  - 结论：**micro>1 不改变 Prefix-TTT 的公式、也不改变优化目标**。
+- **但必须区分"数学不变"与"实现需验证"**：
+  - 算子层已为批量+padding 设计：`local_attention` 用 `valid.nonzero` 只打包有效 token，且按行分块（`rows * blocks * block_size`）保证不同序列不混块，尾部零槽在因果掩码下不影响有效 query；`fla_prefix` 用 `_pack` + `cu_seqlens = valid.sum(1)` 做变长分段；B 阶段把 `prefix_valid_mask=metadata['valid_mask']` 传入混合模型。故架构上支持 micro>1，**但 padding 是否会污染 TTT 状态必须实测验证**。
+  - A 阶段的 `TransferHooks` 诊断**假定每次前向对应一个样本**（`diagnostics[key] += value` 后除以 denominator=128 样本；`visual_samples` 每次前向计 1）→ micro>1 会让这些**日志**按 micro 倍数缩放（仅日志，不影响训练）。
+  - 数据路径需真正批量化：`prepare_sample` 目前构造 `collate([dataset[index]])`（单样本），需改为多样本且 metadata 形状为 [B,T]。
+  - 数值上归约顺序改变 → 与 micro=1 不再逐位可比。
+  - 协议上任务书规定 micro=1，旧 A40 运行亦为 micro=1 → 改变后与既有设计与旧结果的协议一致性受影响，需在论文口径中说明。
+- **若采用 micro>1，要求的等价性验证**：固定同一 128 样本组，micro=1 与 micro=2 各跑一步，比较 loss、grad_norm 与若干参数梯度（应在 bf16 容差内一致）；另做 padding 泄漏测试（单样本单独前向 vs 与更短样本同批，logits 必须一致）。
+- **数据预取/重叠的含义**（回答用户提问）：指让"样本准备（图像解码、缩放、tokenize、多模态展开）"与"GPU 前向反传"并行——当前二者在同一线程内严格串行，GPU 需等 CPU 备好下一个样本。实现方式为有界队列 + 后台线程（PIL/torchvision 会释放 GIL）或 DataLoader worker。样本、顺序与数学完全不变，**协议风险为零**；按当前 SM 约 45%、每 rank 占满 1 核推算，预期收益可观。
+- 建议顺序：先做「预取重叠」与「放开 CPU 侧线程」（协议不变），实测收益后再决定是否需要 micro>1。
+
+## 2026-09-10 micro-batch + DataLoader 改造与逐卡 micro 支持（已实测）
+
+用户要求：允许按 GPU 吞吐调整每卡 micro_batch_size、自动反算梯度累积，同时保持 global batch=128、每步样本集合、损失归一化、裁剪时机、学习率轨迹与数据进度不变。
+
+- 实现（改动仅限"取数据"路径）：
+  - `data_pipeline.micro_batches(order, cursor, rank, world, micro)`：把该 rank 在固定 128 组中的份额 `order[cursor:cursor+128][rank::world]` 重新分块，**集合与顺序不变**。
+  - `data_pipeline.batch_loader(...)`：`DataLoader(batch_size=None, collate_fn=collate, num_workers=config.training.dataloader_workers)`，样本准备（图像解码/缩放/分词/展开）移入 CPU worker 并与 GPU 计算重叠。
+  - `prepare_sample(base, batch, device)`：改为接收已 collate 的批；修正了原实现丢弃的 None 过滤（LLaVA 展开后 `input_ids` 等可能为 None）。
+  - `sft.py`/`transfer.py`：`micro` 读自 config，并支持逐 rank 覆盖 `PREFIX_TTT_MICRO_BATCH`；`batches_per_step = accumulation_steps(world, micro)` 自动反算。
+  - `transfer.py` 诊断：per-forward 平均量改为"先按样本求平均、再对样本求和"，使日志与 micro 分组无关（否则 state_rms/visual/text 统计会随前向次数缩放）。
+- 配置：`micro_batch_size: 1 → 8`、新增 `dataloader_workers: 4`（world=16 时每卡每步正好 8 个样本，故 micro 上限为 8）。
+- 逐条验证：
+  - **global batch=128**：`accumulation_steps` 校验 `128 % (world×micro)==0`；micro=1/2/4/8 → 累积次数 8/4/2/1，每 rank 样本数恒为 8；16 个 rank 的并集恰好等于同一组 0..127（已用脚本断言）。
+  - **样本集合/损失归一化/裁剪时机/学习率轨迹/数据进度**：diff 确认这些代码行**未被触碰**；`token_normalized_ce` 的 `targets` 仍是全局 all_reduce 后的 token 总数。
+  - **异构 micro 安全**：每步集合通信次数与 micro 无关（sft：`all_reduce(targets)`×1 + 每参数×N + `all_reduce(loss_sum)`×1，均在微批循环之外；transfer：每参数×N + 每层诊断×23）→ 允许不同 rank 用不同 micro 而不破坏通信顺序。
+  - **等价性实测**（同一 128 样本组、同起点）：micro=8 vs micro=1，step 1 全部指标相对差 <1.5%（`grad_norm` 5.5e-4、`normalized_sample_mean` 4.7e-4），`visual_samples`/`text_samples` 完全相同；micro=4 vs micro=1 在 3 步 × 3 层 × 10 指标中 87/90 项在 2% 内，超差 3 项均为 step 3 的 `gate_rms`（绝对值差 7e-5，属两步优化后的累积数值差异）。
+  - **性能**：稳态 2.10–2.23 s/step（micro=1）→ 0.92–1.05 s/step（micro=4/8），约 **2.2×**；显存仅 16–20 GiB/80 GiB。
+- 已归档：micro=1 的 A 运行移至 `training/A-micro1-reference`（便于对照）。micro=8 的正式 A 正在 `training/A` 运行。
+- 未做：未实现"按实测吞吐自动选择 micro"的自适应调参（当前为人工通过 config 或 `PREFIX_TTT_MICRO_BATCH` 指定）；未提交、未推送。
+
+## 2026-09-10 micro-batch 改造后的 A 阶段完成与 B 阶段启动
+
+- 用户决定：micro_batch_size 仅由 config 人工指定，不做逐卡覆盖、不做自适应调参。据此已回退 `PREFIX_TTT_MICRO_BATCH` 覆盖（`src/` 中已无残留），保留 `accumulation_steps(world, micro)` 的自动反算。
+- **A 阶段（micro=8 + DataLoader）完整跑完**：391/391 步、`complete=true`、`diagnostic_only=false`、samples_seen=50000、world_size=16、`config_sha256=bc5ec1e2…`（新配置）；耗时 01:56→02:03 共 **7 分钟**（micro=1 时为 15 分钟）。checkpoint 校验：23 层 × 3 = 69 张量、optimizer state 69 条、stage=A、文件 SHA `e83e7e32…`。
+- **DataLoader 已确认工作**：每个 rank 进程下有 **4 个 `pt_data_worker`** 子进程（各约占 4% CPU），此前主进程独占 1 核 100% 的现象消失；GPU 侧 SM 利用率由 38–58% 升至 **89–94%**，功耗由 233–274 W 升至 **434–479 W**（H100 TDP 700 W）。
+- **E2 smoke（3 步，18 卡… 实为 16 卡）**通过：loss 8.84959 / 9.05861 / 9.08356，grad_norm 107.39 / 82.69 / 137.30，稳态 2.05 s/步；checkpoint 校验 layout=E2、world_size=16、`trainable` **517**（448 LoRA + 69 TTT）、`rng_by_rank` 16 份。
+  - 交叉验证：旧机 4×A40（micro=1、world=4）的 E2 首两步 loss 为 **8.84736 / 9.05157**，与本机 16×H100（micro=8、world=16）的 **8.84959 / 9.05861** 在千分位一致，说明数据管线、A 初始化与损失归一化在不同硬件与分组下可复现。
+- **B 阶段正式训练已启动**（`setsid nohup` 脱离会话，两端 node_rank 0/1）：输出 `/data/shared/weights/prefix-ttt/training/E2`，`--save-every 25`，超时 6 小时。日志 `/tmp/B-run/node{0,1}.log`。
+  - 首个 44 步：首步 33.1 s（含编译），后续中位数 **2.69 s/步**；按此估算剩余 5138 步约 **3.8 小时**。loss 8.85 → 4.54，grad_norm 正常，学习率轨迹 5.64e-06（LoRA）/ 2.82e-05（新增模块）随 warmup 上升。
+  - 启动插曲：node 1 首次启动因远端缺少 `/tmp/B-run` 目录失败，补建后重启成功；node 0 在会合点等待并自动接入。
+- 未做：未提交、未推送本次代码与账本改动。
+
+## 2026-09-10 阶段 B（E2 完整轨迹）训练完成
+
+- **结果**：5182/5182 步、`complete=true`、`diagnostic_only=false`、`samples_seen=663248`（全训练集）、world_size=16、`global_step=5182`；产物位于共享存储 `/data/shared/weights/prefix-ttt/training/E2/`（`latest.pt` 1285875223 B、`pilot.pt` 1285873117 B、`steps.jsonl`、`run.json`、`result.json`、`trainable_params.json`）。
+- **耗时**：02:05 启动 → 06:00 结束，约 **3 小时 55 分**；首步 33.1s（含编译），稳态中位数 **2.63 s/步**、均值 2.65 s/步（含每 25 步一次约 1.3GB 的 NFS checkpoint 写入）。
+- **健康度**：step 1..5182 连续无缺；loss 与 grad_norm **无任何非有限值**；loss 曲线 前 20 步均值 8.1691 → Pilot(371–391) 1.1448 → 1000 附近 0.9081 → 中途 0.7961 → 末 20 步 0.7732。末步学习率为 0（余弦调度在 total_steps 处归零，符合设计）。
+- **终态 checkpoint 校验**：`stage=B`、`layout=E2`、`complete=True`、`world_size=16`、`rng_by_rank` 16 份、`trainable` **517** 张量且**全部 FP32 且全部有限**、`optimizer.state` 517、`scheduler.last_epoch=5182`、`diagnostic_only=False`；`manifest/config/stage_a` 三个摘要与 A 阶段及配置一致（stage_a `e83e7e32…`）。
+- **跨机复现对照（重要验证）**：第 391 步（Pilot）末步 CE 旧机 4×A40（world=4, micro=1）为 **1.10585**、末 20 步均值 **1.14615**；本机 16×H100（world=16, micro=8）为 **1.10140** 与 **1.14717**，分别相差 0.4% 与 0.09%。在不同硬件、不同卡数、不同微批分组下达到该一致性，说明固定清单、数据顺序、A 初始化与损失归一化均忠实。
+- 评测入口 `lmms_model.py` 支持 `--checkpoint` 加载阶段 B 的完整可训练张量（LoRA + TTT）；E0 基线在本机尚未运行。
+- 未做：未提交、未推送。
+
+
+## 2026-09-10 评测内打点：性能指标与分数同批采集
+
+- 用户决定：**只在 benchmark 里测 prefill 延迟、TPOT、峰值显存、缓存占用**（不做受控长度扫描、暂不测 FLOPs，E1 暂不训练）。
+- 实现（不改任务/prompt/评分，官方口径不变）：
+  - 新增 `src/prefix_ttt/instrument.py`：`ForwardMeter` 用 forward pre/post hook 对模型**每次前向**用 CUDA event 计时（首次=prefill，其余=decode），并读取最终 `past_key_values` 做缓存分解（Full KV / TTT state / Local 窗口）；`cache_buckets` 同时支持混合缓存与 E0 的普通 DynamicCache。
+  - `lmms_model.PrefixTTTLava` 增加可选 `measure=<jsonl>`：官方 `Llava.generate_until` 内部按 batch_size=1 **逐样本**调用 `self.model.generate(...)`，因此只包这一层即可每请求记一条；多 rank 时按 rank 分文件。
+  - `lmms_run.py` 增加 `--measure`，透传为 model_args。
+  - `profile_inference.py` 改为复用 `instrument.cache_buckets`（去重）。
+  - 修复过程中的三处实际缺陷：forward hook 未开 `with_kwargs` 导致签名不匹配；输出目录不存在时写入失败；LLaVA 展开后是 3 维 `inputs_embeds`，长度读取需兼容。
+- 冒烟验证（E0/MME，limit=4，单卡）：每样本一条记录，`prefill_tokens≈637–645`、prefill 23–25ms（首样本 99ms 含编译）、TPOT 12.3ms、峰值 13.56 GiB、缓存 319–323 MiB。缓存量与解析值一致（32 层 × 2 × 32 头 × ~640 token × 128 × 2B ≈ 320 MiB）。
+- 未打点版评测已完成 5/6（e0 三个 + e2 的 mme/pope），仅 e2/gqa 仍在跑；打点版评测已用独立输出根 `/data/shared/weights/prefix-ttt/eval-instrumented/` 启动 5 个任务（GPU 0,1,2,4,5），e2/gqa 待 GPU 3 释放后补跑。
+- 已记录的初步分数（未打点版，官方 lmms-eval）：E0 MME Perception 1479.6432 / Cognition 349.2857、POPE Accuracy 0.8548 / F1 0.8397；E2 MME Perception 1415.7322 / Cognition 287.1429。**E2 在 MME 上低于 E0**（Perception −4.3%、Cognition −17.8%），耗时 247s→537s（2.2×），需在总结文档中如实呈现。
+- 方法学注意：打点版与未打点版并发运行会争用 CPU/PCIe，绝对延迟偏高；E0 与 E2 在同一条件下测量，横向可比。后续将用一次空闲机器上的单任务复测量化该影响。
+
+## 2026-09-11 评测完成、flash attention 归因与阶段总结文档
+
+- **打点版跑批全部完成**：e0-mme（2374）、e0-pope（9000）、e2-mme（2374）、e2-pope（9000），共 **22748** 条逐请求记录，目录 `/data/shared/weights/prefix-ttt/eval-instrumented/`。e0-gqa 此前被终止，2283 条为半截数据；GQA 无 E2 对照，不进入结论。
+- **打点未干扰评测（逐位一致）**：E0 MME 1479.6432 / 349.2857、POPE 0.8548 / 0.8397；E2 MME 1415.7322 / 287.1429、POPE 0.8507 / 0.8363，与未打点版完全相同；官方评测耗时 E0 244.3 s / 505.6 s，E2 531.1 s / 1534.1 s。
+- **成本中位数**（同任务、同输入长度）：MME（642 token）E0 prefill 23.0 ms、TPOT 12.8 ms、峰值 13.562 GiB、缓存 321.0 MiB；E2 prefill 101.5 ms、TPOT 64.3 ms、峰值 13.846 GiB、缓存 147.8 MiB（90.3 KV + 46.0 状态 + 11.5 窗口）。POPE（637 token）E0 22.8 / 12.4 / 13.562 GiB / 318.5 MiB，E2 95.8 / 58.7 / 13.846 GiB / 147.1 MiB。
+- **并发争用已量化，无需重测**：e2-pope 自身前 3000 条（四任务并发期）与后 3000 条（独占期）对比，prefill 95.9 对 96.0 ms、TPOT 58.8 对 58.8 ms，无可测差异。原计划的"空闲机器单任务复测"据此取消。
+- **flash attention 归因**（660 token、单卡、GPU 7 空闲）：E0 与 E2 都是 `attn_implementation=sdpa`，命中的是 PyTorch 自带的 `pytorch_flash::flash_fwd_kernel`；Dao-AILab `flash_attn` 未安装、也非依赖。计入的 FLOPs E0 8777 G 对 E2 8794 G，其中 flash 部分 228.4 G 对 72.7 G（E2 的注意力算力只有三分之一）；kernel launch 次数 prefill 1363 对 7506、decode 1395 对 6411（4.6×），与 TPOT 之比 5.0× 吻合。结论：**慢在 kernel 数量与访存，不在算术量**。
+- **绘图脚本重写**：`scripts/plot_metrics.py` 原按已废弃的 `profile_inference` 长度扫描 JSON 编写，数据源改为 benchmark 的逐请求 cost JSONL。用户决定只用跑批数据；benchmark 输入长度全落在 634–663 token，长度曲线做不出来，改为逐任务分布图。产出 `images/{cost_by_task,cache_by_task,score_vs_cost}.png` 与 `metrics-summary.json`。
+- **长度基准修正**：早期日志 E0 记的是展开后位置数、E2 记的是纯文本 token 数。本总结统一用缓存字节反推（E0 524288 B/token、E2 147456 B/token），并用 2374 对同序样本交叉验证（长度差均值 −0.001）。`instrument.py` 已改为直接记录 `prefill_positions`；现有日志产生于该改动之前，故无此字段，反推法继续有效。
+- **阶段总结已写**：`experiment_summary.md`，含结论「E2 在 640 token 上 prefill 慢 4.4×、TPOT 慢 5.0×、缓存只有 46%，MME Cognition 掉 17.8%」。
+- 未做（用户决定）：E1 训练、E2 的 GQA、benchmark 内的 FLOPs 测量。`profile_inference.py` 保留未删。本地改动仍未提交、未推送。
+
+## 2026-09-11 代码清理：需求变更残留审计与重构
+
+- 用户要求检查代码是否干净、有无需求变更遗留的死代码。用两个只读 subagent 做独立审计（符号级死代码审计；CLI/配置/脚本/测试一致性审计），关键结论由本智能体复核。
+- **审计结论：需求变更的删除没有留下孤儿函数。** `check_baselines`、`--require-baseline`、`MANIFEST_SHA256`、`expected_sha256`、`check_switch_diagnostic`、`check_pilot_diagnostics` 在 `src/`、`tests/`、`configs/`、`scripts/` 中全部 0 命中（仅本账本散文保留删除记录）；42 个 CLI flag 无失效引用，15 个测试文件无失效 import，5 个脚本的入口与参数全部存在。
+- 本次改动（外科手术式，未触碰无关代码）：
+  - `sft.py` 删除 `sample_group`：micro-batch 改造后模块内已无调用者，其唯一语义（128 组按 rank 切分）已被 `data_pipeline.micro_batches` 内联覆盖。
+  - `transfer.py` 删除随之失效的 `sample_group` 未使用 import。
+  - `tests/test_sft.py` 移除该函数的导入与用例；新增 `tests/test_data_pipeline.py`，把同一条划分不变量改测 `micro_batches`（含分块与顺序），覆盖面不减少。
+  - `instrument.py` 删除 `ForwardMeter.close()`、`self._handles`、`prefill_input_tokens`/`self.tokens`：前者无调用者（meter 每进程只建一次、无需摘钩子）；后者无人读取，且它的基准不一致正是上一次长度混淆的来源，只保留语义明确的 `prefill_positions`。
+  - `scripts/run_eval_instrumented.sh`：默认 RUN 去掉 GQA（E2 未跑、无对照），修正头部注释的 GPU 映射。
+  - `README.md`：修正因需求变更而失真的四处——主账本链接指向旧目录、`configs/supervisor/` 与 systemd 样例"保留"的说法（实际已删）、"FLA GPU 数值与性能/正式 A/B runner 尚需实施"的过期状态、"本轮没有提交训练或 benchmark"；并补充两台主机共享存储的现状。
+  - 统一新建文件权限（`.py` 644、`.sh` 755），与仓库既有模式一致。
+- 验证：`pytest -m 'not gpu'` → 159 passed、17 deselected、0 failed（改动前后同为 0 失败；数量变化可逐项归因：删除基线门槛用例 8 个、`sample_group` 用例 1 个，新增 2 个，Supervisor 3 个由 skip 转为执行）。GPU 冒烟：清理后的 `ForwardMeter` 仍每请求一条记录且含 `prefill_positions`（64 token 用例，缓存 32.5 MiB 与解析值一致）。
+- 只报告、未改动（等用户决定）：
+  - `profile_inference.py`：整模块无消费者，其长度扫描方案已被"只在 benchmark 内测量"取代；该文件未被 git 跟踪，删除不可恢复，故先询问。
+  - `scripts/run_eval_parallel.sh`：未打点版，与打点版协议相同、分数逐位一致，属重复入口。
+  - `configs/base.json` 有 28 个键在 `src/` 无读取点（值在代码中硬编码且当前恰好一致，如 `lora.rank/alpha`、`training.*_lr`、`betas`、`grad_clip`、`max_expanded_length`、`generation.*`）；风险是"改了配置但行为不变"，但该文件参与 `config_sha256` 身份，改动会让现有 A/E2 checkpoint 无法恢复，故不动。
+  - 与本轮变更无关的历史死代码（保留）：`bridge.audit_checkpoint_headers`、`ops/fla.FLA_COMMIT`、`generation.TransformersHybridCache.tensor_bytes` 全仓无引用，但都早于本轮变更。`sft.py` 中 `if group:` 的 else 分支在本轮改造后不可达（固定清单尾组为 80 条 ≥ 16 个 rank，空组不会出现；且一旦出现会先因流耗尽报错），但该分支改造前就存在，未改。
+  - 本账本中指向已删文件的历史句（`migration_from_a40.md` 的链接、`configs/supervisor/*` 的描述）按"保留历史记录"的既定决定未回改。
+- 用户决定后执行的删除（2026-09-11）：
+  - `src/prefix_ttt/profile_inference.py`（183 行）：无消费者，保留只会让读者以为还有受控长度扫描这条路。
+  - `docs/experiments/2026-09-10-prefix-ttt-h100/scripts/run_eval_parallel.sh`：与打点版重复；打点版是超集（同样产出官方分数 + 成本日志），头部注释改为不再引用它。
+  - 三个与本轮变更无关的历史死符号：`bridge.audit_checkpoint_headers`（bridge.py 尾部整函数，33 行，含其函数内 import）、`ops/fla.py` 的 `FLA_COMMIT` 常量（FLA 提交哈希仍在 `ops/README.md` 与 `audit_environment.py` 的版本字符串中，未丢失）、`generation.TransformersHybridCache.tensor_bytes` 属性。`cache.HybridCache.tensor_bytes` 因被 `tests/test_cache.py` 使用而保留。
+  - 处理后复核：`grep -rn` 三者在 `src/`、`tests/`、`configs/`、`scripts/`、`README.md` 中 0 命中；`pytest -m 'not gpu'` → 159 passed、17 deselected、0 failed；`CUDA_VISIBLE_DEVICES=7 pytest -m gpu` → **17 passed**（82.64s，FLA/Triton 路径在删除 `FLA_COMMIT` 后仍完整可用）。
+  - `configs/base.json` **未改动**：按用户决定保留为配方记录，并在阶段总结中说明这些键当前不生效。
+
+## 2026-09-11 SDPA 后端对比、decode kernel 归因与 LoRA 合并实测
+
+- 动机：用户问「是否该关掉 SDPA 的 flash attention 改用朴素实现」「prefix-TTT 的计算后端是什么」「为什么 kernel 调用次数更多」。
+- **SDPA 后端对比**（640 token 文本前缀、单卡、预热后 3 次中位数、`sdpa_kernel` 强制选择）：
+
+  | 模型 | 后端 | prefill | TPOT | 峰值显存 | 每请求 kernel |
+  | --- | --- | --- | --- | --- | --- |
+  | E0 | flash（默认） | 26.8 ms | 17.1 ms | 13.88 GiB | 12146 |
+  | E0 | mem-efficient | 25.5 ms | 16.7 ms | 13.88 GiB | 11890 |
+  | E0 | math（朴素） | 37.2 ms | 21.3 ms | 14.00 GiB | 15474 |
+  | E2 | flash（默认） | 114.4 ms | 81.1 ms | 14.03 GiB | 51322 |
+  | E2 | mem-efficient | 114.9 ms | 80.8 ms | 14.03 GiB | 51249 |
+  | E2 | math（朴素） | 124.5 ms | 89.2 ms | 14.10 GiB | 56488 |
+
+  结论：朴素实现确实内置于 SDPA（`SDPBackend.MATH`），但关掉 flash 对 E0 的伤害（prefill +39%、TPOT +25%）远大于对 E2 的（+9%、+10%），等于单方面拖慢基线，且 MATH 会物化 $L \times L$ 分数矩阵（8k 上下文每层约 4 GB），与项目要避免的 $O(L^2)$ 代价相悖。**本智能体建议维持默认**（两者同口径接受 PyTorch 的默认选择），待用户确认；若要与使用 eager attention 的历史数字对齐，必须 E0/E2 同时用 math 重跑，现有数据不可混用。
+- **prefix-TTT 计算后端**：prefill/训练走 FLA Triton（`fla_prefix` → `chunk_linear_attn` tile 64 或 `chunk_simple_gla` tile 16/32/128，FP32 状态进出）；**decode（t=1）走手写 ATen**（`recurrent_step`：关 autocast、`.float()` 后两个 einsum）；Local-32 与 9 个 anchor 层走 `F.scaled_dot_product_attention`（命中 flash）。`chunk_prefix` 参考实现只用于测试。
+- **decode kernel 归因**（`TorchDispatchMode` 计数一个 decode step 的 dispatcher op）：E0 2440 ops（实测 1492 kernel），E2 10215 ops（实测 5953 kernel），比值 4.2×/4.0×。E2 分解：TTT 层自身投影/rotary/mask/o_proj 2208（96/层）、`features()` 1702（74/层）、Local-32 包装 943、Local-32 打包+SDPA 759、`recurrent_step` 851、`readout()` 322、`set_layer` 256，其余 3174 为 9 个 anchor 层 + MLP + 采样。即 **TTT 层每 token 约 306 个 op，而 E0 的普通层只有 76 个**。
+  三个结构性原因：① 23 层每层都要做局部注意力、两组特征映射、递推与读出门控；② LoRA 覆盖每层全部 7 个投影（`trainability.py` 校验 `layers × 7`），每个包装后的 Linear = 基座 mm + 2 个小 mm，使每 token 的 mm 由 224 升到 672；③ FP32/bf16 混用导致大量 cast 与逐元素 kernel（`rms_no_affine` 每层调 3 次、`recurrent_step` cast 6 次，`_to_copy` 单步 900 次 vs E0 的 133）。另有 t=1 时无用的训练期簿记（`nonzero`/`cumsum`/`index_copy`，即 cub DeviceSelect/Scan kernel 的来源）。
+  量级关系：**TPOT ≈ 每 kernel 约 10 µs × kernel 条数**（E0 benchmark 1395→12.8 ms、E2 6411→64.3 ms），所以 decode 慢的本质是 kernel 条数。
+- **LoRA 合并实测**（推理时把 `B@A*scaling` 并入 bf16 基座权重、绕开 LoRA 分支，224 个投影）：prefill 114.0 → 96.4 ms（−15%）、TPOT 80.3 → 61.9 ms（−23%）、每请求 kernel 51323 → 38778（−25%）；8 个 greedy token 逐位不变。这条与「TPOT ∝ kernel 数」互相印证。代价是把增量舍入进 bf16 权重（数值略有变化），当前代码仍保持未合并（`lmms_model.py` 刻意不合并、也不引入 PEFT 的 generate 包装）。
+- 未实施：融合 `features()`/RMS 的 cast 链、Local-32 的 decode 专用路径、`recurrent_step` 改用 FLA fused recurrent kernel、跨层批处理、CUDA graph / `torch.compile`。以上均为候选方案，需要用户决定是否投入。
+- 证据脚本为一次性 `/tmp` 脚本（已删除），数据来源为 GPU 7 单卡实测；`pytest` 与 GPU 用例未受本轮影响。
+
+## 2026-09-11 推理 kernel 优化：①③ 落地、②④ 实测为负收益（用户批准的四项）
+
+- 用户决定：按 ①→②→③→④ 顺序优化 kernel，不关闭 FA2；用**单个最快的 benchmark**（E2/MME，单卡约 8–9 分钟）作为每步回归指标。
+- **方法学更正（重要）**：benchmark 跑批之间的绝对延迟**不可跨跑批比较**。基线 `e2-mme` 是在 4 个任务并发时采集的；晚些时候同一份未优化代码单独跑，prefill 就低了约 6%。因此每项优化的加速改用**同一进程内切换开关的 A/B**（同一张卡、同一前缀、同一进程，4 次中位数），benchmark 跑批只用于正确性（官方分数 + 逐样本回答）。此前"并发无可测影响"的结论据此更正。
+- **单进程 A/B 结果**（640 token 文本前缀 + 8 个新 token，GPU 6 独占）：
+
+  | 变体 | prefill | TPOT | kernel/请求 | TPOT 加速 |
+  | --- | --- | --- | --- | --- |
+  | 基线（当前报告口径） | 115.6 ms | 81.3 ms | 51323 | ×1.00 |
+  | ① LoRA 合并 | 94.9 | 61.2 | 38777 | ×1.33 |
+  | ③ Local-32 decode 专用路径 | 115.3 | 65.4 | 41983 | ×1.24 |
+  | **①+③（最终保留）** | **94.5** | **46.7** | **29438** | **×1.74** |
+  | ①+③+④ | 94.4 | 48.9 | 28310 | ×1.67（更慢，已回退） |
+
+- **① LoRA 合并（保留）**：新增 `trainability.merge_lora_weights`（校验 `layers×7` 完整后把 `B@A×scaling` 并入基座权重，并用 base layer 替换包装模块）；`lmms_model` 增 `merge_lora` 开关（默认开），`lmms_run` 增 `--no-merge-lora` 供 A/B。单测 `test_lora_merge_is_exact_and_removes_lora_branches` 校验合并后的权重与 FP32 精确值逐位相等、forward 与未合并一致、LoRA 分支消失。
+- **③ Local-32 decode 专用路径（保留）**：`ops/local.py` 新增 `local_attention_decode`：解码时只把新 token 写进 32 槽缓冲，用布尔 mask 表达可见集合，取代 `nonzero`/`cumsum`/`index_copy` 打包（每层 71 → 13 个 kernel）。`hybrid.py` 在 `t==1` 且有缓存时走它。单测 `test_cached_local_attention_decode_matches_the_packed_path`：90 步、跨多个 32 块边界、带空洞，与打包路径逐 token 对齐（1e-4 内），缓存可见尾部逐位相同、计数完全一致。
+- **② features/readout 融合（两次尝试，全部回退）**：
+  - 换写法（einsum → 批量 matmul、`F.rms_norm` 代替显式链）：kernel 数**一个没少**（被替换的 permute/view 是纯 metadata，不产生 kernel），TPOT 不变 → 回退。
+  - `torch.compile` 融合：kernel 29441 → 26129（RMS）/ 25209（连 features+readout）**减少**，但 TPOT 45.8 → **52.7 / 50.6 ms 变慢**。微基准给出原因：解码形状下一次 RMS 的墙钟耗时为显式链 32.9 µs、`F.rms_norm` 29.8 µs、编译版 **47.4 µs**——Inductor 每次调用的 guard/分派开销超过了省下的 6 次小 kernel 启动 → 回退。
+- **④ FLA fused recurrent（实测后回退）**：用 `fla.ops.linear_attn.fused_recurrent_linear_attn`（`scale=1.0`、`v/128`、`normalize=False`）替换 `recurrent_step`。等价性实测：输出相对误差 1.07e-7、状态 0（bf16 输入）/ 6e-9（fp32 输入），非法行状态不变。但 kernel 29438 → 28310 的同时 TPOT 46.7 → **48.9 ms 变慢**（FLA 每次调用的 Python 侧预处理约 100 µs×23 层）→ 回退。
+- **结论**：在这个尺寸（batch=1、单 token、32×128 张量）下，真正有效的是**减少工作量**（①让 448 个 LoRA 矩阵乘消失）与**用同一个原语折叠整条算子链**（③不引入新的框架调用开销）；把"很多小 kernel 换成一个大的框架 kernel"（Inductor / FLA 调用）是亏的。原因是这些 kernel 的单次开销里，框架的 Python/分派成本大于 GPU 执行成本。
+- **MME 正确性回归**（单卡单任务，逐样本回答比对）：
+
+  | 跑批 | MME Perception | MME Cognition | 回答变化 | 说明 |
+  | --- | --- | --- | --- | --- |
+  | 基线（记录值） | 1415.7322 | 287.1429 | — | 未优化 |
+  | ① merge-lora | 1429.4893 (+13.76) | 278.2143 (−8.93) | 22/2374 | bf16 舍入增量导致 |
+  | ③ no-merge | 逐位不变 | 逐位不变 | 0/2374 | 数值中立 |
+  | ①+③ 最终 | 1429.4893 | 278.2143 | 22/2374（与①单独的 22 条完全相同） | ③ 未额外改变任何回答 |
+
+  最终跑批的成本中位数（该跑批独占机器）：prefill 101.5 → 78.5 ms（×1.29）、TPOT 64.3 → **34.4 ms（×1.87）**、峰值显存 13.845 → 13.515 GiB（LoRA 参数被合并后释放）、缓存占用不变。基线的绝对值含并发影响，故 ×1.87 略高于同进程 A/B 的 ×1.74。
+- 新增可复用脚本：`scripts/run_e2_mme_check.sh`（单卡跑 E2/MME + 成本日志，自动与基线比对）、`scripts/compare_eval_runs.py`（分数、逐样本回答、成本中位数三项对比）。
+- **待用户决定**：合并 LoRA 是否作为正式口径（会使 E2 的 MME 与 POPE 数字变化，POPE 需重跑）；③ 与 ① 无关，可随时作为默认。
+- 未提交、未推送。
+
+## 2026-09-11 LoRA 合并固化为唯一推理路径 + 工程审计与重构
+
+- 用户决定：① 合并作为默认推理路径，但**训练侧仍保持 LoRA 分开**，**不提供导出合并权重的接口**（只在内存中合并一次），并**删除运行时的合并开关与"合并/未合并两份计算"的对照代码**，避免困惑；② 随后做工程审计与重构（分层、设计、去硬编码、去历史包袱）；③ 重构完成后重跑 benchmark。
+- **合并固化**：`lmms_model.PrefixTTTLava` 删除 `merge_lora` 参数与字符串解析，加载 LoRA 后无条件调用 `merge_lora_weights`；`lmms_run.py` 删除 `--no-merge-lora`；`self.merged_lora` 计数属性删除（合并函数自身在数量不符时会抛错）。测试改为断言"合并后的 q_proj 权重 = 基座 bf16 权重 + A/B 折出的增量"（E1/E2 两种 layout 都测），并保留 FP32 精确性单测。GPU 冒烟：适配器加载后模型内 `lora_` 模块数 0、可训练参数 0、生成正常。
+- **审计**：两个只读 subagent 分别做「分层与重复」与「硬编码与配置」审计，结论要点：
+  - 内部依赖图**无环**，`ops/` 零内部依赖、`model → ops` 单向；但有 4 处分层违规：推理 `lmms_model` 依赖训练入口 `sft`、A 阶段 `transfer` 依赖 B 入口 `sft`、`pilot_diagnostic → switch_diagnostic → gpu_regression` 顺带拖入 PIL/HF-Llava，以及 `third_party/llava` 反向 import `prefix_ttt`（后者限制模型层重构，未动）。
+  - 重复：`sft.py` 与 `transfer.py` 归一化后完全相同 67 行；`pilot` 与 `switch` 51 行；`transfer.py:57-75` 手抄 `hybrid.py:55-92` 的 attention 前向（审计标记为全仓最高风险重复）；`gpu_smoke.py:161-179` 手抄 `prepare_sample`。
+  - 硬编码：anchor 名单双源（`hybrid.py` 常量 vs `base.json`，只有 `transfer.py` 读 config）；`1/128` 六处字面量；Local-32 的 `32` 十七处以上；全局 batch `128` 十一处；`2048` 承担四种不同语义；`-100` 十一处。
+  - **关键约束**：`config_sha256 = digest_json(configs/base.json)` 已写入 A/E2 checkpoint，**改动该文件即破坏 resume 身份**，故审计建议不动 `base.json`。
+- **已执行的重构（纯搬运 / 命名 / 加断言，行为与数值不变）**：
+  - 新增 `src/prefix_ttt/runtime.py`：`distributed_context`（消除 sft/transfer 各 13 行重复的分布式初始化）、`seed_everything`、`rng_state`/`restore_rng`/`gather_rng`、`save_atomic`、`load_trainable`，以及 `SEED`/`LATEST`/`PILOT` 常量。`lmms_model`、`pilot_diagnostic` 改从这里取 `load_trainable`，**推理路径不再 import 训练入口**（实测：`import prefix_ttt.lmms_model` 现在拉起 15 个内部模块、0 个 ijson，且不含 `sft`）。
+  - 新增 `src/prefix_ttt/digests.py`：`digest_file`/`digest_json` 从 220 行、依赖 ijson 的 `manifests.py` 搬出。
+  - 新增 `src/prefix_ttt/config.py`：`load_config()` 读取配方并**逐项校验 29 个"装饰键"与代码常量一致**（eta、local_block_size、tile_size、max_expanded_length、num_heads/head_dim/feature_dim、LoRA 参数、全部优化器超参、generation 默认值、seed 等），再校验 anchor 名单与"候选层覆盖全部非 anchor 层"；sft/transfer/两个诊断/两个 GPU 工具统一改用它（原来各自 `json.loads` 两次）。新增 `tests/test_config.py` 6 个用例证明漂移会被拒绝。
+  - 常量单点化：`ops/__init__.py` 从"无人使用的重导出"改为 `ETA`(2⁻⁷)、`LOCAL_BLOCK_SIZE`(32)、`TILE_SIZE`(64) 的唯一来源；`EFFECTIVE_BATCH_SIZE`、优化器超参（`NEW_MODULE_LR`/`LORA_LR`/`ADAM_BETAS`/`ADAM_EPS`/`MATRIX_WEIGHT_DECAY`/`WARMUP_FRACTION`/`GRAD_CLIP`）、`PILOT_MIN_SAMPLES` 进 `training.py`；`IGNORE_INDEX` 进 `model/labels.py`（避免轻量模块为 `-100` 去 import 3 秒、4445 个模块的 `llava`）；`MAX_EXPANDED_LENGTH`/`PINNED_SHAPE`/`IMAGE_ASPECT_RATIO` 进 `model/bridge.py`；`LORA_*` 进 `trainability.py`；`CONV_TEMPLATE` 进 `data_pipeline.py`；`A_STAGE_SAMPLES` 进 `manifests.py`；`MAX_NEW_TOKENS`/`NUM_BEAMS`/`DO_SAMPLE` 进 `model/generation.py`；`RMS_EPS` 进 `ops/features.py`；`LLM_PROJECTIONS_PER_LAYER` 统一 install 与 merge 的 `×7`。
+  - 校验：`ETA` 的替换经逐位比较确认与 `/128` 完全相同（fp32 与 bf16）；CPU 套件 161 → **167 passed / 0 failed**（新增 6 个配置校验用例）；GPU 套件 **17 passed**（82.2s）。
+- **故意未做（需要取舍或会改变行为）**：`transfer.py` 手抄的 attention 前向（要求先写等价性测试）；`gpu_smoke.py` / `scheduler.py` / 两个诊断模块的去留；`configs/base.json` 的任何编辑（会破坏 A/E2 的 resume 身份）；`third_party/llava` 的反向依赖。
+- **benchmark 重跑（用户第 ③ 条）**：见下条。
+
+## 2026-09-11 benchmark 重跑（合并口径 + 两项优化后）
+
+- 命令：`scripts/run_benchmark_check.sh postrefactor <task>`，单卡 GPU 7 独占，先 MME 后 POPE（不并发，保证成本数字可比）；产物在 `/data/shared/weights/prefix-ttt/eval-optimized/postrefactor/`。
+- **与旧基线（未合并 LoRA、未优化）对照**：
+
+  | 任务 | 指标 | 旧 | 新 | 变化 |
+  | --- | --- | --- | --- | --- |
+  | MME | Perception | 1415.7322 | **1429.4893** | +13.7571 |
+  | MME | Cognition | 287.1429 | **278.2143** | −8.9286 |
+  | POPE | Accuracy | 0.8507 | **0.8501** | −0.0006 |
+  | POPE | F1 | 0.8363 | **0.8357** | −0.0006 |
+
+  - 逐样本回答变化：MME 22/2374（0.9%）、POPE 41/9000（0.46%），全部来自合并 LoRA 的那一次 bf16 舍入；单独测 ③ 时回答逐位不变（见上一条）。
+  - 成本中位数：MME prefill 101.472 → 78.917 ms（×1.29）、TPOT 64.276 → 34.660 ms（×1.85）；POPE prefill 95.807 → 78.084 ms（×1.23）、TPOT 58.688 → 34.271 ms（×1.71）；峰值显存 13.845 → 13.51 GiB（LoRA 参数释放）；缓存占用不变。
+  - 端到端墙钟：MME 531 → 434 s，POPE 1534 → 1170 s。
+- **重构无回归的证据**：把 `postrefactor` 与"优化后、重构前"的 `opt-lora-fastdecode` 跑批逐样本比对——分数逐位相同、**2374/2374 条回答完全一致**、成本中位数差异 <1%（prefill 78.53 → 78.92 ms、TPOT 34.35 → 34.66 ms）。
+- 汇总产物同步更新：`eval-final/`（用符号链接把 E0 的旧结果与 E2 的新结果合成一个根，供绘图脚本消费）、重新生成的 `images/*.png` 与 `metrics-summary.json`、`experiment_summary.md` 的 4.1/4.2/4.3/5/8 节数字。
+- 仍待用户决定：是否删除 `gpu_smoke.py`、`scheduler.py`（及其两个测试）、`pilot_diagnostic.py`/`switch_diagnostic.py` 等历史模块；是否把 `transfer.py` 手抄的 attention 前向收敛到 `hybrid.py`（需先加等价性测试）。未提交、未推送。
+
+## 2026-09-11 决策落地：删除 gpu_smoke、保留排队器、暂不改 transfer、单 commit 提交并推送
+
+- 用户决定：① **删除** `src/prefix_ttt/gpu_smoke.py`；② **保留** `scheduler.py`（单机 SQLite 排队器，后续可能启用）；③ **暂不改** `transfer.py` 手抄的 attention 前向（先不做等价性测试与抽取）；④ 本轮全部工作合并为**一个 commit** 并推送到远端。
+- 删除对象与理由：`gpu_smoke.py`（257 行）自述为 "Disposable real-checkpoint SFT capacity diagnostic; never a formal B run"，是 A40 时代回答"4×48GB 能否放下近 2048 token 的真实 7B 样本"的诊断（旧账本 `docs/experiments/2026-09-09-prefix-ttt/gpu_capacity.md:37-38` 记录了它的单卡与 4 卡 DDP 用法）。澄清一处易混：**本机的多机 smoke 不是它**——两次 smoke（16 卡 E1、3 步 E2）都用 `prefix_ttt.sft --max-steps` 经 `run_multinode.sh` 启动，与正式训练同一个入口；`gpu_smoke.py` 在本机现行流程里没有任何调用点。
+- 保留理由：`scheduler.py` 与 DDP 无关（单机 GPU 队列），本机从未启用，但后续可能使用；当前只有 `tests/test_scheduler.py`、`tests/test_supervisor.py` import 它。
+- 验证：删除后 CPU 套件 **167 passed / 0 failed**；`src/`、`tests/`、`configs/`、`README.md` 中对 `gpu_smoke` 的引用 0 命中。旧实验目录 `gpu_capacity.md` 中记录其运行命令的句子按"历史记录不回改"的约定保留。
+- 提交：单个 commit，作者 `Codex <codex@openai.com>`，推送到 `origin` 的 `h100` 分支。推送前核对：本地与远端 `refs/heads/h100` 均为 `49acbe2`（无分叉，普通快进推送，未使用 force）。

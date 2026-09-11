@@ -1,52 +1,26 @@
 """One immutable B trajectory: matched E1/E2 Pilot, then exact continuation."""
 import argparse
 import json
-import os
+import math
 from pathlib import Path
-import random
-import socket
 import time
 
-import numpy as np
 import torch
 import torch.distributed as dist
 
-from prefix_ttt.data_pipeline import load_manifest, build_dataset, prepare_sample
-from prefix_ttt.manifests import digest_file, digest_json
+from prefix_ttt.config import load_config
+from prefix_ttt.data_pipeline import (load_manifest, build_dataset, prepare_sample,
+                                      micro_batches, batch_loader)
+from prefix_ttt.digests import digest_file, digest_json
+from prefix_ttt.runtime import (LATEST, PILOT, SEED, distributed_context, gather_rng,
+                                load_trainable, restore_rng, save_atomic, seed_everything)
 from prefix_ttt.model.bridge import load_checkpoint, load_tokenizer
 from prefix_ttt.model.hybrid import install_prefix_ttt
+from prefix_ttt.model.labels import IGNORE_INDEX
 from prefix_ttt.model.trainability import install_lora, audit_parameters
-from prefix_ttt.training import accumulation_steps, cosine_factor, optimizer_groups, token_normalized_ce, trajectory
-
-
-def sample_group(order, cursor, rank, world_size):
-    """A partial last group is never padded with repeated samples."""
-    return order[cursor:cursor + 128][rank::world_size]
-
-
-def rng_state():
-    return {'python': random.getstate(), 'numpy': np.random.get_state(),
-            'torch': torch.get_rng_state(),
-            'cuda': torch.cuda.get_rng_state() if torch.cuda.is_initialized() else None}
-
-
-def restore_rng(state):
-    random.setstate(state['python'])
-    np.random.set_state(state['numpy'])
-    torch.set_rng_state(state['torch'])
-    if state['cuda'] is not None:
-        torch.cuda.set_rng_state(state['cuda'])
-
-
-def load_trainable(model, state):
-    parameters = {n: p for n, p in model.named_parameters() if p.requires_grad}
-    if parameters.keys() != state.keys():
-        raise ValueError('Checkpoint trainable parameter names differ')
-    with torch.no_grad():
-        for name, parameter in parameters.items():
-            if parameter.shape != state[name].shape:
-                raise ValueError(f'Checkpoint shape mismatch: {name}')
-            parameter.copy_(state[name])
+from prefix_ttt.training import (ADAM_BETAS, ADAM_EPS, EFFECTIVE_BATCH_SIZE, GRAD_CLIP,
+                                 accumulation_steps, cosine_factor, optimizer_groups,
+                                 token_normalized_ce, trajectory)
 
 
 def main():
@@ -70,23 +44,12 @@ def main():
         parser.error('--save-every must be positive')
     if args.layout == 'E2' and not args.stage_a_checkpoint:
         parser.error('E2 requires completed phase A; zero-gate debug is not formal B')
-    rank, world = int(os.environ.get('RANK', 0)), int(os.environ.get('WORLD_SIZE', 1))
-    local_rank = int(os.environ.get('LOCAL_RANK', 0))
-    accumulation_steps(world, 1)
-    if not torch.cuda.is_available():
-        raise RuntimeError('Formal SFT requires validated CUDA/FLA; no CPU fallback')
-    torch.cuda.set_device(local_rank)
-    device = torch.device('cuda', local_rank)
-    if world > 1:
-        dist.init_process_group('nccl', device_id=device)
-        print(json.dumps({'host': socket.gethostname(), 'rank': rank, 'world_size': world,
-                          'local_rank': local_rank,
-                          'device': torch.cuda.get_device_name(local_rank)}), flush=True)
+    config = load_config(args.config)
+    rank, world, device = distributed_context('Formal SFT')
+    micro = int(config['training']['micro_batch_size'])
+    batches_per_step = accumulation_steps(world, micro)
     try:
-        random.seed(42)
-        np.random.seed(42)
-        torch.manual_seed(42)
-        config = json.loads(Path(args.config).read_text())
+        seed_everything(SEED)
         manifest, manifest_sha = load_manifest(args.manifest, config['data_root'])
         schedule = trajectory(len(manifest['train']))
         identity = dict(stage='B', layout=args.layout, manifest_sha256=manifest_sha,
@@ -96,7 +59,7 @@ def main():
                         diagnostic_only=args.max_steps is not None)
         output = Path(args.output)
         output.mkdir(parents=True, exist_ok=True)
-        if not args.resume and (output / 'latest.pt').exists():
+        if not args.resume and (output / LATEST).exists():
             raise ValueError('Existing trajectory requires explicit --resume')
         path = Path(config['data_root']) / config['model_relative_path']
         model, _ = load_checkpoint(path, dtype=torch.bfloat16)
@@ -109,7 +72,7 @@ def main():
                     or stage_a.get('diagnostic_only', False) or stage_a.get('manifest_sha256') != manifest_sha
                     or stage_a.get('config_sha256') != identity['config_sha256']
                     or stage_a.get('samples_seen') != len(manifest['A'])
-                    or stage_a.get('global_step') != (len(manifest['A']) + 127) // 128):
+                    or stage_a.get('global_step') != math.ceil(len(manifest['A']) / EFFECTIVE_BATCH_SIZE)):
                 raise ValueError('Phase A checkpoint is incomplete or uses a different manifest')
             installed = {str(index) for index, layer in enumerate(model.model.layers)
                          if hasattr(layer.self_attn, 'prefix_ttt')}
@@ -128,7 +91,8 @@ def main():
         base = model.get_base_model()
         base.get_vision_tower().eval()
         parameters = [p for p in model.parameters() if p.requires_grad]
-        optimizer = torch.optim.AdamW(optimizer_groups(model, new_parameters), betas=(0.9, 0.95), eps=1e-8)
+        optimizer = torch.optim.AdamW(optimizer_groups(model, new_parameters),
+                                      betas=ADAM_BETAS, eps=ADAM_EPS)
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda step: cosine_factor(step, schedule['total_steps']))
         cursor = step = 0
         if args.resume:
@@ -139,7 +103,7 @@ def main():
             optimizer.load_state_dict(checkpoint['optimizer'])
             scheduler.load_state_dict(checkpoint['scheduler'])
             cursor, step = checkpoint['samples_seen'], checkpoint['global_step']
-            if cursor != min(step * 128, len(manifest['train'])):
+            if cursor != min(step * EFFECTIVE_BATCH_SIZE, len(manifest['train'])):
                 raise ValueError('Invalid resume cursor')
             if checkpoint.get('world_size') != world:
                 print(f'Resuming across world_size {checkpoint.get("world_size")} -> {world}; '
@@ -153,19 +117,13 @@ def main():
             (output / 'run.json').write_text(json.dumps({**identity, 'world_size': world, **schedule, 'config': config, 'argv': vars(args)}, indent=2))
 
         def save(name, complete=False):
-            states = [None] * world if rank == 0 else None
-            if world > 1:
-                dist.gather_object(rng_state(), states, dst=0)
-            else:
-                states = [rng_state()]
+            states = gather_rng(rank, world)
             if rank == 0:
-                state = {**identity, 'world_size': world, 'complete': complete, 'global_step': step,
+                save_atomic(output / name, {
+                    **identity, 'world_size': world, 'complete': complete, 'global_step': step,
                     'samples_seen': cursor, 'rng_by_rank': states,
                     'trainable': {n: p.detach().cpu() for n, p in model.named_parameters() if p.requires_grad},
-                    'optimizer': optimizer.state_dict(), 'scheduler': scheduler.state_dict()}
-                temporary = output / (name + '.tmp')
-                torch.save(state, temporary)
-                temporary.replace(output / name)
+                    'optimizer': optimizer.state_dict(), 'scheduler': scheduler.state_dict()})
             if world > 1:
                 dist.barrier()
 
@@ -174,11 +132,14 @@ def main():
             stop = min(stop, args.max_steps)
         if args.stop_after is not None:
             stop = min(stop, step + args.stop_after)
+        index_batches = [batch for start in range(cursor, len(manifest['train']), EFFECTIVE_BATCH_SIZE)
+                         for batch in micro_batches(manifest['train'], start, rank, world, micro)]
+        stream = iter(batch_loader(dataset, collate, index_batches,
+                                   int(config['training'].get('dataloader_workers', 0))))
         while step < stop:
             started = time.perf_counter()
-            group = [prepare_sample(base, dataset, collate, index, device)[0]
-                     for index in sample_group(manifest['train'], cursor, rank, world)]
-            targets = torch.tensor(sum(int(batch['labels'][:, 1:].ne(-100).sum()) for batch in group), device=device)
+            group = [prepare_sample(base, next(stream), device)[0] for _ in range(batches_per_step)]
+            targets = torch.tensor(sum(int(batch['labels'][:, 1:].ne(IGNORE_INDEX).sum()) for batch in group), device=device)
             if world > 1:
                 dist.all_reduce(targets)
             optimizer.zero_grad(set_to_none=True)
@@ -204,11 +165,11 @@ def main():
                     dist.all_reduce(parameter.grad)
                 if not torch.isfinite(parameter.grad).all():
                     raise FloatingPointError('Nonfinite SFT gradient')
-            norm = torch.nn.utils.clip_grad_norm_(parameters, 1.0)
+            norm = torch.nn.utils.clip_grad_norm_(parameters, GRAD_CLIP)
             optimizer.step()
             scheduler.step()
             step += 1
-            cursor = min(cursor + 128, len(manifest['train']))
+            cursor = min(cursor + EFFECTIVE_BATCH_SIZE, len(manifest['train']))
             if world > 1:
                 dist.all_reduce(loss_sum)
             if rank == 0:
@@ -219,9 +180,9 @@ def main():
                     handle.write(json.dumps(record) + '\n')
                 print(json.dumps(record), flush=True)
             if step == schedule['pilot_step']:
-                save('pilot.pt')
+                save(PILOT)
             if step == 1 or step % args.save_every == 0 or step == stop:
-                save('latest.pt', complete=cursor == len(manifest['train']))
+                save(LATEST, complete=cursor == len(manifest['train']))
         if rank == 0:
             (output / 'result.json').write_text(json.dumps({**identity, 'world_size': world, 'global_step': step,
                 'samples_seen': cursor, 'complete': cursor == len(manifest['train']),

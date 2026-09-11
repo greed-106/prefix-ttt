@@ -10,10 +10,11 @@ from lmms_eval.models import MODEL_REGISTRY_V2
 from lmms_eval.models.registry_v2 import ModelManifest
 from lmms_eval.models.simple.llava import Llava
 
+from prefix_ttt.instrument import ForwardMeter, append_record
 from prefix_ttt.model.bridge import load_checkpoint, load_tokenizer
 from prefix_ttt.model.hybrid import install_prefix_ttt
-from prefix_ttt.model.trainability import install_lora
-from prefix_ttt.sft import load_trainable
+from prefix_ttt.model.trainability import install_lora, merge_lora_weights
+from prefix_ttt.runtime import load_trainable
 
 
 @register_model('prefix_ttt_llava')
@@ -26,7 +27,7 @@ class PrefixTTTLlava(Llava):
     """
 
     def __init__(self, pretrained, checkpoint=None, batch_size=1,
-                 device='cuda:0', conv_template='vicuna_v1', **kwargs):
+                 device='cuda:0', conv_template='vicuna_v1', measure=None, **kwargs):
         lmms.__init__(self)
         if kwargs:
             raise ValueError(f'Unsupported model options: {sorted(kwargs)}')
@@ -54,8 +55,11 @@ class PrefixTTTLlava(Llava):
                               if state['layout'] == 'E2' else [])
             model = install_lora(model, new_parameters=new_parameters)
             load_trainable(model, state['trainable'])
-            # Keep installed LoRA modules unmerged for every trained layout,
-            # without PEFT's generate wrapper injecting extra cache arguments.
+            # Inference always serves the folded weights: two matmuls per projection
+            # disappear. The checkpoint keeps the trained LoRA tensors, so training
+            # and any future fine-tuning still see the adapter.
+            merge_lora_weights(model)
+            # Drop PEFT's wrapper so its generate() cannot inject extra cache arguments.
             model = model.get_base_model()
             del state
         # Never cast the whole module: preserve FP32 RoPE and new parameters.
@@ -68,6 +72,22 @@ class PrefixTTTLlava(Llava):
         self.use_cache = True
         self.truncation = True
         self.truncate_context = False
+        # Optional per-request cost log. The official generate_until loop is left
+        # untouched; only the model's own generate call is timed, once per request.
+        if measure:
+            self._meter = ForwardMeter(self._model)
+            self._measure_path = (f'{measure}.rank{self._rank}.jsonl'
+                                  if self._world_size > 1 else measure)
+            original = self._model.generate
+
+            def measured_generate(*args, **kwargs):
+                torch.cuda.reset_peak_memory_stats()
+                self._meter.begin()
+                result = original(*args, **kwargs)
+                append_record(self._measure_path, self._meter.finish({'rank': self._rank}))
+                return result
+
+            self._model.generate = measured_generate
 
 
 # The pinned lmms-eval 0.7.2 CLI resolves declarative model manifests.

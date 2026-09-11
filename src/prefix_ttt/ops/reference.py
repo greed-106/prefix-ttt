@@ -1,10 +1,12 @@
 """Small correctness oracles; not production training backends.
 
-Inputs are [B,T,H,R], [B,T,H,R], [B,T,H,D]. Eta is fixed by
-the project, even when tests use smaller feature dimensions.
+Inputs are [B,T,H,R], [B,T,H,R], [B,T,H,D]. The write scale is fixed by the
+project, even when tests use smaller feature dimensions.
 """
 
 import torch
+
+from prefix_ttt.ops import ETA, TILE_SIZE
 
 
 def _prepare(q, k, v, state, valid):
@@ -32,13 +34,13 @@ def sequential_prefix(q, k, v, initial_state=None, valid=None):
     outputs = []
     with torch.autocast(device_type=q.device.type, enabled=False):
         for t in range(q.shape[1]):
-            state = state + torch.einsum("bhr,bhd->bhrd", k[:, t], v[:, t]) / 128
+            state = state + torch.einsum("bhr,bhd->bhrd", k[:, t], v[:, t]) * ETA
             outputs.append(torch.einsum("bhr,bhrd->bhd", q[:, t], state))
     out = torch.stack(outputs, 1) if outputs else v[:, :0]
     return out.to(output_dtype), state
 
 
-def chunk_prefix(q, k, v, initial_state=None, valid=None, tile_size=64):
+def chunk_prefix(q, k, v, initial_state=None, valid=None, tile_size=TILE_SIZE):
     """Exact tile expression, never materializing a state for every token."""
     if tile_size <= 0:
         raise ValueError("tile_size must be positive")
@@ -50,7 +52,7 @@ def chunk_prefix(q, k, v, initial_state=None, valid=None, tile_size=64):
             qc, kc, vc = (x[:, start:start + tile_size] for x in (q, k, v))
             scores = torch.einsum("bthr,bshr->bhts", qc, kc).tril()
             outputs.append(torch.einsum("bthr,bhrd->bthd", qc, state)
-                           + torch.einsum("bhts,bshd->bthd", scores, vc) / 128)
-            state = state + torch.einsum("bthr,bthd->bhrd", kc, vc) / 128
+                           + torch.einsum("bhts,bshd->bthd", scores, vc) * ETA)
+            state = state + torch.einsum("bthr,bthd->bhrd", kc, vc) * ETA
     out = torch.cat(outputs, 1) if outputs else v[:, :0]
     return out.to(output_dtype), state

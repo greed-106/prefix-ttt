@@ -9,8 +9,11 @@ from pathlib import Path, PurePosixPath
 
 import ijson
 
+from prefix_ttt.digests import digest_file, digest_json
+
 
 SCHEMA_VERSION = 1
+A_STAGE_SAMPLES = 50_000   # phase-A quota inside the fixed manifest
 PREPROCESS_FILES = (
     'src/prefix_ttt/audit_data.py', 'src/prefix_ttt/model/labels.py',
     'src/prefix_ttt/model/supervision.py', 'src/prefix_ttt/model/bridge.py',
@@ -19,19 +22,6 @@ PREPROCESS_FILES = (
 )
 EXCLUSIONS = {'data_invalid_conversations', 'data_invalid_turn', 'data_no_assistant_content',
               'unsupported_image_schema', 'protocol_image_truncated', 'protocol_answer_truncated'}
-
-
-def digest_file(path):
-    value = hashlib.sha256()
-    with Path(path).open('rb') as handle:
-        for block in iter(lambda: handle.read(4 * 1024 * 1024), b''):
-            value.update(block)
-    return value.hexdigest()
-
-
-def digest_json(value):
-    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
-                                      separators=(',', ':')).encode()).hexdigest()
 
 
 def stable_key(seed, namespace, value):
@@ -59,7 +49,7 @@ def length_bucket(length):
 
 
 def build(annotation, label_rows, label_summary, image_summary, *, dev_size=2048,
-          a_size=50_000, seed=42, preprocess_files=None, execution_source_files=None):
+          a_size=A_STAGE_SAMPLES, seed=42, preprocess_files=None, execution_source_files=None):
     if type(dev_size) is not int or dev_size < 1 or type(a_size) is not int or a_size < 1:
         raise ValueError('Positive integer dev and A sizes required')
     annotation, label_rows = Path(annotation), Path(label_rows)

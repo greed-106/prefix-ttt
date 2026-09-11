@@ -7,9 +7,10 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 
+from prefix_ttt.config import load_config
 from prefix_ttt.data_pipeline import load_manifest, build_dataset, prepare_sample
 from prefix_ttt.gpu_regression import compare
-from prefix_ttt.manifests import digest_file, digest_json
+from prefix_ttt.digests import digest_json
 from prefix_ttt.model.bridge import load_checkpoint, load_tokenizer
 from prefix_ttt.model.hybrid import install_prefix_ttt
 
@@ -57,7 +58,7 @@ def main():
     output = Path(args.output)
     if output.exists():
         raise ValueError('Diagnostic output exists; do not overwrite previous evidence')
-    config = json.loads(Path(args.config).read_text())
+    config = load_config(args.config)
     manifest, manifest_sha = load_manifest(args.manifest, config['data_root'])
     config_sha = digest_json(config)
     stage_a = torch.load(args.stage_a_checkpoint, map_location='cpu', weights_only=False)
@@ -93,7 +94,7 @@ def main():
     prepared, teacher = {}, {}
     with torch.no_grad(), torch.autocast('cuda', dtype=torch.bfloat16):
         for index, modality in selected:
-            values, _ = prepare_sample(model, dataset, collate, index, device)
+            values, _ = prepare_sample(model, collate([dataset[index]]), device)
             prepared[index] = values
             inputs = {key: value.to(device) for key, value in values.items() if key != 'labels'}
             logits = model(**inputs, use_cache=False).logits[:, :-1]
