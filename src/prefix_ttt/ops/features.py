@@ -23,11 +23,47 @@ class FeatureReadout(nn.Module):
         self.b_phi = nn.Parameter(torch.randn(shape, generator=generator) / math.sqrt(head_dim))
         self.gate_weight = nn.Parameter(torch.zeros(heads, hidden_size))
 
+    @torch.no_grad()
+    def prepare_inference(self):
+        """Prepare serving copies after loading; training keeps the FP32 masters."""
+        a, b = self.a_phi.to(torch.bfloat16), self.b_phi.to(torch.bfloat16)
+        self.register_buffer('packed_phi_inference', torch.cat((a, b, a, b)), persistent=False)
+        heads = a.shape[0]
+        self.register_buffer('a_phi_inference', self.packed_phi_inference[:heads], persistent=False)
+        self.register_buffer('b_phi_inference', self.packed_phi_inference[heads:2 * heads], persistent=False)
+        self.register_buffer('gate_weight_inference', self.gate_weight.to(torch.bfloat16), persistent=False)
+
+    def inference_weight(self, name, x):
+        weight = getattr(self, name)
+        if not torch.is_grad_enabled():
+            dtype = (torch.get_autocast_dtype(x.device.type)
+                     if torch.is_autocast_enabled(x.device.type) else x.dtype)
+            if dtype == torch.bfloat16:
+                return getattr(self, name + '_inference', weight)
+        return weight
+
     def features(self, x):
-        a = torch.einsum("bthd,hdr->bthr", x, self.a_phi)
-        b = torch.einsum("bthd,hdr->bthr", x, self.b_phi)
+        a = torch.einsum("bthd,hdr->bthr", x, self.inference_weight('a_phi', x))
+        b = torch.einsum("bthd,hdr->bthr", x, self.inference_weight('b_phi', x))
+        if x.is_cuda and not torch.is_grad_enabled() and x.dtype in (torch.bfloat16, torch.float32):
+            from prefix_ttt.ops.fused_features import silu_rms
+            return silu_rms(a, b)
         return rms_no_affine(F.silu(a) * b)
 
+    def features_pair(self, q, k):
+        if (q.is_cuda and not torch.is_grad_enabled()
+                and q.dtype == k.dtype == torch.bfloat16
+                and q.shape == k.shape == (1, 1, 32, 128)
+                and torch.is_autocast_enabled('cuda')
+                and torch.get_autocast_dtype('cuda') == torch.bfloat16
+                and hasattr(self, 'packed_phi_inference')):
+            from prefix_ttt.ops.fused_features import silu_rms
+            x = torch.stack((q, q, k, k)).reshape(128, 1, 128)
+            projected = torch.bmm(x, self.packed_phi_inference)
+            qa, qb, ka, kb = projected.reshape(4, 1, 1, 32, 128).unbind(0)
+            return silu_rms(qa, qb), silu_rms(ka, kb)
+        return self.features(q), self.features(k)
+
     def readout(self, x, memory):
-        gate = F.linear(x, self.gate_weight)
+        gate = F.linear(x, self.inference_weight('gate_weight', x))
         return gate.unsqueeze(-1) * rms_no_affine(memory)

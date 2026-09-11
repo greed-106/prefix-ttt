@@ -1,0 +1,11 @@
+== official e2/mme score
+   mme_cognition_score          278.2142857142857  ->  278.2142857142857   (+0.0000)
+   mme_perception_score         1429.4892957182874  ->  1429.4892957182874   (+0.0000)
+== responses: 2374 recorded, 0 changed, 0 missing
+== per-request cost (median)
+   count                    2374.000 ->   2374.000   (+0.000)
+   prefill (ms)               78.917 ->     60.703   (-18.214)   x1.30
+   TPOT (ms/token)            34.660 ->     30.352   (-4.308)   x1.14
+   peak allocated (GiB)       13.515 ->     13.607   (+98418688.000)
+   cache (MiB)               147.781 ->    147.781   (+0.000)
+   cache full KV (MiB)        90.281 ->     90.281   (+0.000)

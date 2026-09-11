@@ -9,6 +9,9 @@ from prefix_ttt.ops.local import (local_attention, local_attention_cached,
                                  local_attention_decode, LocalCache)
 from prefix_ttt.ops.reference import chunk_prefix
 from prefix_ttt.ops.fla import fla_prefix, recurrent_step
+from prefix_ttt.ops.fused_features import readout as fused_readout
+from prefix_ttt.ops.fused_recurrent import recurrent_decode
+from prefix_ttt.ops.fused_rotary import rotary as fused_rotary
 from prefix_ttt.cache import LayerState
 from prefix_ttt.runtime import SEED
 from prefix_ttt.model.generation import TransformersHybridCache
@@ -58,7 +61,10 @@ class PrefixTTTAttention(nn.Module):
         q = self.q_proj(hidden_states).view(shape).transpose(1, 2)
         k = self.k_proj(hidden_states).view(shape).transpose(1, 2)
         v = self.v_proj(hidden_states).view(shape)
-        q, k = apply_rotary_pos_emb(q, k, *position_embeddings)
+        fused = (caching and q.is_cuda and q.dtype in (torch.bfloat16, torch.float32)
+                 and all(x.dtype == q.dtype for x in (k, *position_embeddings)))
+        q, k = (fused_rotary(q, k, *position_embeddings) if fused
+                else apply_rotary_pos_emb(q, k, *position_embeddings))
         q, k = q.transpose(1, 2), k.transpose(1, 2)
         old = past_key_value.storage.layers.get(self.layer_idx) if caching else None
         initial_state = None if old is None else old.state
@@ -76,9 +82,12 @@ class PrefixTTTAttention(nn.Module):
         amp_dtype = q.dtype if q.dtype in (torch.bfloat16, torch.float16) else torch.bfloat16
         amp_enabled = q.dtype in (torch.bfloat16, torch.float16)
         with torch.autocast(device_type=q.device.type, dtype=amp_dtype, enabled=amp_enabled):
-            qf, kf = self.prefix_ttt.features(q), self.prefix_ttt.features(k)
+            qf, kf = self.prefix_ttt.features_pair(q, k)
         if caching and t == 1:
-            memory, state = recurrent_step(qf, kf, v, initial_state=initial_state, valid=valid)
+            if fused:
+                memory, state = recurrent_decode(qf, kf, v, initial_state, valid)
+            else:
+                memory, state = recurrent_step(qf, kf, v, initial_state=initial_state, valid=valid)
         elif self.backend == 'reference':
             memory, state = chunk_prefix(qf, kf, v, initial_state=initial_state,
                                          valid=valid, tile_size=self.tile_size)
@@ -89,8 +98,13 @@ class PrefixTTTAttention(nn.Module):
             past_key_value.storage.set_layer(self.layer_idx, LayerState(state=state,
                 key=final_local.key, value=final_local.value, local_position=final_local.lengths))
         with torch.autocast(device_type=q.device.type, dtype=amp_dtype, enabled=amp_enabled):
-            residual = self.prefix_ttt.readout(hidden_states, memory)
-        combined = (local + residual).masked_fill(~valid[..., None, None], 0)
+            if fused:
+                gate = torch.nn.functional.linear(hidden_states,
+                    self.prefix_ttt.inference_weight('gate_weight', hidden_states))
+                combined = fused_readout(memory, gate, local, valid)
+            else:
+                residual = self.prefix_ttt.readout(hidden_states, memory)
+                combined = (local + residual).masked_fill(~valid[..., None, None], 0)
         output = self.o_proj(combined.reshape(b, t, -1))
         return output.masked_fill(~valid[..., None], 0), None
 

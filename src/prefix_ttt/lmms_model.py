@@ -15,6 +15,7 @@ from prefix_ttt.model.bridge import load_checkpoint, load_tokenizer
 from prefix_ttt.model.hybrid import install_prefix_ttt
 from prefix_ttt.model.trainability import install_lora, merge_lora_weights
 from prefix_ttt.runtime import load_trainable
+from prefix_ttt.ops.features import FeatureReadout
 
 
 @register_model('prefix_ttt_llava')
@@ -64,6 +65,9 @@ class PrefixTTTLlava(Llava):
             del state
         # Never cast the whole module: preserve FP32 RoPE and new parameters.
         self._model = model.to(self._device).eval().requires_grad_(False)
+        for module in self._model.modules():
+            if isinstance(module, FeatureReadout):
+                module.prepare_inference()
         self._config = self._model.config
         self._config.use_cache = True
         self._max_length = self._config.tokenizer_model_max_length

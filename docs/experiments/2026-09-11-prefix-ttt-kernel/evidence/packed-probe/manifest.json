@@ -1,0 +1,75 @@
+{
+  "cwd": "/data/mjyang/code/llm/prefix-ttt",
+  "env": {
+    "PATH": "/data/mjyang/.local/bin:/data/mjyang/.pixi/bin:/data/mjyang/code/llm/prefix-ttt/.venv/bin:/usr/local/cuda-12.8/bin:/usr/bin:/bin",
+    "CUDA_HOME": "/usr/local/cuda-12.8",
+    "LD_LIBRARY_PATH": "/usr/local/cuda-12.8/lib64",
+    "HF_ENDPOINT": "https://hf-mirror.com",
+    "HF_HOME": "/data/mjyang/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/hf-home",
+    "HF_HUB_OFFLINE": "1",
+    "HF_DATASETS_OFFLINE": "1",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "PYTHONUNBUFFERED": "1",
+    "UV_CACHE_DIR": "/data/mjyang/.cache/uv",
+    "TRITON_CACHE_DIR": "/data/mjyang/.triton/cache",
+    "HF_DATASETS_CACHE": "/data/mjyang/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/hf-home/datasets",
+    "LMMS_EVAL_DATASETS_CACHE": "/data/mjyang/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/benchmarks/hf-home/datasets"
+  },
+  "jobs": [
+    {
+      "id": "length-640",
+      "gpu_count": 1,
+      "timeout_seconds": 2400,
+      "argv": [
+        "/data/mjyang/.local/bin/uv",
+        "run",
+        "--locked",
+        "--no-sync",
+        "python",
+        "/data/mjyang/code/llm/prefix-ttt/docs/experiments/2026-09-11-prefix-ttt-kernel/scripts/measure.py",
+        "--pretrained",
+        "/data/mjyang/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/models/llava-1.5-7b-hf-b234b804b114d9e37bb655e11cbbb5f5e971b7a9",
+        "--checkpoint",
+        "/data/shared/weights/prefix-ttt/training/E2/latest.pt",
+        "--output",
+        "/data/mjyang/code/llm/prefix-ttt/docs/experiments/2026-09-11-prefix-ttt-kernel/evidence/packed-probe/640.json",
+        "--lengths",
+        "640",
+        "--steps",
+        "128",
+        "--repeats",
+        "3",
+        "--with-e0",
+        "--with-unpacked"
+      ]
+    },
+    {
+      "id": "length-1536",
+      "gpu_count": 1,
+      "timeout_seconds": 2400,
+      "argv": [
+        "/data/mjyang/.local/bin/uv",
+        "run",
+        "--locked",
+        "--no-sync",
+        "python",
+        "/data/mjyang/code/llm/prefix-ttt/docs/experiments/2026-09-11-prefix-ttt-kernel/scripts/measure.py",
+        "--pretrained",
+        "/data/mjyang/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/models/llava-1.5-7b-hf-b234b804b114d9e37bb655e11cbbb5f5e971b7a9",
+        "--checkpoint",
+        "/data/shared/weights/prefix-ttt/training/E2/latest.pt",
+        "--output",
+        "/data/mjyang/code/llm/prefix-ttt/docs/experiments/2026-09-11-prefix-ttt-kernel/evidence/packed-probe/1536.json",
+        "--lengths",
+        "1536",
+        "--steps",
+        "128",
+        "--repeats",
+        "3",
+        "--with-e0",
+        "--with-unpacked"
+      ]
+    }
+  ]
+}

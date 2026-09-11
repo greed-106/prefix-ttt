@@ -1,0 +1,3 @@
+# Runtime logs are archived outside the repository.
+*.log
+*.log.*

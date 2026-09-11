@@ -32,7 +32,7 @@ def _run_kernel(q, k, v, state, need_final_state, tile_size, cu_seqlens):
 
 def fla_prefix(q, k, v, initial_state=None, need_final_state=True, valid=None,
                tile_size=TILE_SIZE):
-    """FLA prefill, padded independent rows unpacked through cu_seqlens."""
+    """FLA prefill: dense masked inference, packed independent training rows."""
     if not q.is_cuda:
         raise RuntimeError("FLA Prefix-TTT requires a CUDA GPU; CPU/reference only is not GPU validation")
     if q.ndim != 4 or q.shape != k.shape or q.shape[:3] != v.shape[:3]:
@@ -44,6 +44,15 @@ def fla_prefix(q, k, v, initial_state=None, need_final_state=True, valid=None,
         raise ValueError("FLA initial state must use FP32 storage")
     if valid is None:
         valid = torch.ones(q.shape[:2], dtype=torch.bool, device=q.device)
+    if valid.shape != q.shape[:2] or valid.dtype != torch.bool:
+        raise ValueError("valid must be boolean [B,T]")
+    if not torch.is_grad_enabled() and q.shape[1] > 0:
+        # Zero writes preserve state; physical padding need not be packed away.
+        masked = (x.masked_fill(~valid[..., None, None], 0) for x in (q, k, v))
+        out, final = _run_kernel(*masked, initial_state, need_final_state, tile_size, None)
+        if need_final_state and final.dtype != torch.float32:
+            raise RuntimeError("FLA returned non-FP32 final state; backend contract violated")
+        return out, final
     (pq, pk, pv), active, cu_seqlens = _pack(q, k, v, valid)
     base_state = (q.new_zeros(state_shape, dtype=torch.float32)
                   if initial_state is None else initial_state)
@@ -84,4 +93,3 @@ def recurrent_step(q, k, v, initial_state=None, valid=None):
         state = initial_state + torch.einsum("bhr,bhd->bhrd", kf[:, 0], vf[:, 0]) * ETA
         out = torch.einsum("bhr,bhrd->bhd", qf[:, 0], state).unsqueeze(1)
     return out.to(q.dtype), state
-

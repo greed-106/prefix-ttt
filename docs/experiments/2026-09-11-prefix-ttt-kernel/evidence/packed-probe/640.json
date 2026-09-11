@@ -1,0 +1,176 @@
+{
+  "config": {
+    "pretrained": "/data/mjyang/code/llm/prefix-ttt/data/llava-v1.5-assets-v1/models/llava-1.5-7b-hf-b234b804b114d9e37bb655e11cbbb5f5e971b7a9",
+    "checkpoint": "/data/shared/weights/prefix-ttt/training/E2/latest.pt",
+    "output": "/data/mjyang/code/llm/prefix-ttt/docs/experiments/2026-09-11-prefix-ttt-kernel/evidence/packed-probe/640.json",
+    "lengths": "640",
+    "steps": 128,
+    "repeats": 3,
+    "with_e0": true,
+    "with_unpacked": true
+  },
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "torch": "2.7.1+cu128",
+  "allow_tf32": true,
+  "baseline_commit": "16d67fe",
+  "measurements": {
+    "e0-640": {
+      "summary": {
+        "e0": {
+          "prefill_ms": 22.8855037689209,
+          "tpot_ms": 11.407391548156738,
+          "forward_loop_wall_ms": 1476.709034992382,
+          "prefill_range_ms": [
+            22.862367630004883,
+            22.95039939880371
+          ],
+          "cache": {
+            "full_kv_bytes": 402653184,
+            "ttt_state_bytes": 0,
+            "local_window_bytes": 0,
+            "total_bytes": 402653184
+          }
+        }
+      },
+      "e0_profile": {
+        "prefill": {
+          "kernel_count": 1364,
+          "device_us": 21061.24399999996,
+          "memory_activity_count": {
+            "Memset (Device)": 65
+          }
+        },
+        "decode": {
+          "kernel_count": 1492,
+          "device_us": 9552.68200000002,
+          "memory_activity_count": {}
+        }
+      }
+    },
+    "e2-640": {
+      "summary": {
+        "current": {
+          "prefill_ms": 79.33602905273438,
+          "tpot_ms": 37.78590393066406,
+          "forward_loop_wall_ms": 4926.9043719395995,
+          "prefill_range_ms": [
+            79.09677124023438,
+            79.44873809814453
+          ],
+          "cache": {
+            "full_kv_bytes": 113246208,
+            "ttt_state_bytes": 48234496,
+            "local_window_bytes": 12058808,
+            "total_bytes": 173539512
+          }
+        },
+        "unpacked": {
+          "prefill_ms": 58.751007080078125,
+          "tpot_ms": 34.73396682739258,
+          "forward_loop_wall_ms": 4518.25744996313,
+          "prefill_range_ms": [
+            58.681121826171875,
+            58.954463958740234
+          ],
+          "cache": {
+            "full_kv_bytes": 113246208,
+            "ttt_state_bytes": 48234496,
+            "local_window_bytes": 12058808,
+            "total_bytes": 173539512
+          }
+        },
+        "fused": {
+          "prefill_ms": 58.79999923706055,
+          "tpot_ms": 32.733407974243164,
+          "forward_loop_wall_ms": 4265.240495093167,
+          "prefill_range_ms": [
+            58.55660629272461,
+            59.05052947998047
+          ],
+          "cache": {
+            "full_kv_bytes": 113246208,
+            "ttt_state_bytes": 48234496,
+            "local_window_bytes": 12058808,
+            "total_bytes": 173539512
+          }
+        }
+      },
+      "current_profile": {
+        "prefill": {
+          "kernel_count": 5136,
+          "device_us": 35928.486999999885,
+          "memory_activity_count": {
+            "Memcpy DtoD (Device -> Device)": 295,
+            "Memcpy DtoH (Device -> Pinned)": 231,
+            "Memset (Device)": 65
+          }
+        },
+        "decode": {
+          "kernel_count": 3182,
+          "device_us": 12529.395999999992,
+          "memory_activity_count": {
+            "Memcpy DtoD (Device -> Device)": 180,
+            "Memcpy DtoH (Device -> Pinned)": 1
+          }
+        }
+      },
+      "unpacked_profile": {
+        "prefill": {
+          "kernel_count": 3066,
+          "device_us": 28125.770999999746,
+          "memory_activity_count": {
+            "Memcpy DtoD (Device -> Device)": 249,
+            "Memcpy DtoH (Device -> Pinned)": 47,
+            "Memset (Device)": 65
+          }
+        },
+        "decode": {
+          "kernel_count": 2009,
+          "device_us": 9989.326000000032,
+          "memory_activity_count": {
+            "Memcpy DtoD (Device -> Device)": 88,
+            "Memcpy DtoH (Device -> Pinned)": 1
+          }
+        }
+      },
+      "fused_profile": {
+        "prefill": {
+          "kernel_count": 3066,
+          "device_us": 28130.935000000187,
+          "memory_activity_count": {
+            "Memcpy DtoD (Device -> Device)": 249,
+            "Memcpy DtoH (Device -> Pinned)": 47,
+            "Memset (Device)": 65
+          }
+        },
+        "decode": {
+          "kernel_count": 1963,
+          "device_us": 9901.527999999926,
+          "memory_activity_count": {
+            "Memcpy DtoD (Device -> Device)": 88,
+            "Memcpy DtoH (Device -> Pinned)": 1
+          }
+        }
+      },
+      "correctness": {
+        "logits_equal": true,
+        "logits_finite": true,
+        "logits_max_abs": 0,
+        "logits_relative_l2": 0,
+        "argmax_equal": true,
+        "packed_unpacked_equal": true
+      }
+    }
+  },
+  "artifact_note": {
+    "kind": "compact_summary",
+    "omitted": [
+      "per-step timing samples",
+      "full kernel-name dictionaries",
+      "argmax token arrays",
+      "per-operator CPU profile rankings"
+    ],
+    "original": "/data/mjyang/.local/share/prefix-ttt-recovery/kernel-cleanup-2026-09-12-F2eTbh/experiment/evidence/packed-probe/640.json",
+    "interpretation": "Summary values copied unchanged; profiling and latency were measured separately."
+  }
+}
