@@ -1,0 +1,208 @@
+{
+  "scores": {
+    "e0": {
+      "mme": {
+        "perception": 1479.6431572629053,
+        "cognition": 349.2857142857143,
+        "_samples": 2374,
+        "_seconds": "244.33273306000046"
+      },
+      "pope": {
+        "accuracy": 0.8547777777777777,
+        "f1": 0.8397302268546903,
+        "_samples": 9000,
+        "_seconds": "505.5730981269735"
+      }
+    },
+    "e2": {
+      "mme": {
+        "perception": 1429.4892957182874,
+        "cognition": 278.2142857142857,
+        "_samples": 2374,
+        "_seconds": "387.777922244044"
+      },
+      "pope": {
+        "accuracy": 0.8501111111111112,
+        "f1": 0.8357081963220071,
+        "_samples": 9000,
+        "_seconds": "1012.730450747069"
+      }
+    }
+  },
+  "tasks": {
+    "e0-mme": {
+      "requests": 2374,
+      "prefill_ms": {
+        "median": 23.01916790008545,
+        "p25": 22.70254421234131,
+        "p75": 23.099175453186035
+      },
+      "tpot_ms": {
+        "median": 12.788080215454102,
+        "p25": 12.694584131240845,
+        "p75": 12.850919961929321
+      },
+      "peak_allocated_bytes": {
+        "median": 13.562041282653809,
+        "p25": 13.560878276824951,
+        "p75": 13.563202857971191
+      },
+      "length": {
+        "median": 642.0,
+        "min": 634.0,
+        "max": 663.0
+      },
+      "cache_median_bytes": {
+        "full_kv_bytes": 336592896.0,
+        "ttt_state_bytes": 0.0,
+        "local_window_bytes": 0.0
+      },
+      "cache_median_total_bytes": 336592896.0
+    },
+    "e2-mme": {
+      "requests": 2374,
+      "prefill_ms": {
+        "median": 62.0951042175293,
+        "p25": 61.866432189941406,
+        "p75": 62.40856075286865
+      },
+      "tpot_ms": {
+        "median": 31.12452793121338,
+        "p25": 31.007863521575928,
+        "p75": 31.24984836578369
+      },
+      "peak_allocated_bytes": {
+        "median": 13.606791496276855,
+        "p25": 13.605555534362793,
+        "p75": 13.607957363128662
+      },
+      "length": {
+        "median": 641.0,
+        "min": 633.0,
+        "max": 662.0
+      },
+      "cache_median_bytes": {
+        "full_kv_bytes": 94666752.0,
+        "ttt_state_bytes": 48234496.0,
+        "local_window_bytes": 12058808.0
+      },
+      "cache_median_total_bytes": 154960056.0
+    },
+    "e2full-mme": {
+      "requests": 2374,
+      "prefill_ms": {
+        "median": 62.57579231262207,
+        "p25": 62.40031147003174,
+        "p75": 62.86788845062256
+      },
+      "tpot_ms": {
+        "median": 31.46940803527832,
+        "p25": 31.352415561676025,
+        "p75": 31.586415767669678
+      },
+      "peak_allocated_bytes": {
+        "median": 13.606791496276855,
+        "p25": 13.605555534362793,
+        "p75": 13.607957363128662
+      },
+      "length": {
+        "median": 641.0,
+        "min": 633.0,
+        "max": 662.0
+      },
+      "cache_median_bytes": {
+        "full_kv_bytes": 94666752.0,
+        "ttt_state_bytes": 48234496.0,
+        "local_window_bytes": 12058808.0
+      },
+      "cache_median_total_bytes": 154960056.0
+    },
+    "e0-pope": {
+      "requests": 9000,
+      "prefill_ms": {
+        "median": 22.835087776184082,
+        "p25": 22.81490468978882,
+        "p75": 22.857544422149658
+      },
+      "tpot_ms": {
+        "median": 12.446159839630127,
+        "p25": 12.391704082489014,
+        "p75": 12.53229570388794
+      },
+      "peak_allocated_bytes": {
+        "median": 13.559257507324219,
+        "p25": 13.559257507324219,
+        "p75": 13.559808254241943
+      },
+      "length": {
+        "median": 637.0,
+        "min": 637.0,
+        "max": 640.0
+      },
+      "cache_median_bytes": {
+        "full_kv_bytes": 333971456.0,
+        "ttt_state_bytes": 0.0,
+        "local_window_bytes": 0.0
+      },
+      "cache_median_total_bytes": 333971456.0
+    },
+    "e2-pope": {
+      "requests": 9000,
+      "prefill_ms": {
+        "median": 62.290767669677734,
+        "p25": 62.118672370910645,
+        "p75": 62.42691230773926
+      },
+      "tpot_ms": {
+        "median": 31.666815757751465,
+        "p25": 31.534575939178467,
+        "p75": 31.779560565948486
+      },
+      "peak_allocated_bytes": {
+        "median": 13.608497142791748,
+        "p25": 13.608497142791748,
+        "p75": 13.608635425567627
+      },
+      "length": {
+        "median": 636.0,
+        "min": 636.0,
+        "max": 639.0
+      },
+      "cache_median_bytes": {
+        "full_kv_bytes": 93929472.0,
+        "ttt_state_bytes": 48234496.0,
+        "local_window_bytes": 12058808.0
+      },
+      "cache_median_total_bytes": 154222776.0
+    },
+    "e2full-pope": {
+      "requests": 9000,
+      "prefill_ms": {
+        "median": 60.65231895446777,
+        "p25": 60.51279067993164,
+        "p75": 60.81145477294922
+      },
+      "tpot_ms": {
+        "median": 30.27235221862793,
+        "p25": 30.166768074035645,
+        "p75": 30.3957200050354
+      },
+      "peak_allocated_bytes": {
+        "median": 13.608497142791748,
+        "p25": 13.608497142791748,
+        "p75": 13.608635425567627
+      },
+      "length": {
+        "median": 636.0,
+        "min": 636.0,
+        "max": 639.0
+      },
+      "cache_median_bytes": {
+        "full_kv_bytes": 93929472.0,
+        "ttt_state_bytes": 48234496.0,
+        "local_window_bytes": 12058808.0
+      },
+      "cache_median_total_bytes": 154222776.0
+    }
+  }
+}

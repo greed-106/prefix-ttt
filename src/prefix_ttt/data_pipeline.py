@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import torch
 
-from prefix_ttt.digests import digest_file
+from prefix_ttt.digests import digest_file, digest_json
 from prefix_ttt.model.bridge import MAX_EXPANDED_LENGTH
 from prefix_ttt.model.labels import IGNORE_INDEX
 from prefix_ttt.training import EFFECTIVE_BATCH_SIZE
@@ -76,13 +76,29 @@ def batch_loader(dataset, collate, index_batches, workers):
         num_workers=workers, prefetch_factor=2 if workers else None)
 
 
-def prepare_sample(base, batch, device):
+def prepare_sample(base, batch, device, trainable_embedding=False):
+    """Expand one sample and move it to the device.
+
+    ``trainable_embedding`` is set by full fine-tuning, whose whitelist contains the
+    multimodal projector and the token embedding. Both are built in here, so the
+    fixed ``no_grad`` would silently deny them every gradient. Dropping it does not
+    retain vision activations: the vision tower's parameters are frozen and its
+    input never requires grad, so autograd records nothing through it.
+    """
     batch = {key: value.to(device) for key, value in batch.items()}
-    with torch.no_grad(), torch.autocast(device.type, dtype=torch.bfloat16, enabled=device.type == 'cuda'):
+    with torch.set_grad_enabled(trainable_embedding), torch.autocast(
+            device.type, dtype=torch.bfloat16, enabled=device.type == 'cuda'):
         prepared, metadata = base.prepare_inputs_labels_for_multimodal(
             batch['input_ids'], None, batch['attention_mask'], None,
             batch['labels'], batch['images'], return_metadata=True)
     ids, positions, mask, _, embeds, labels = prepared
+    if trainable_embedding:
+        # The residual stream must stay BF16. Llama's rotary embedding adopts the
+        # hidden dtype, so an FP32 stream would hand FP32 q/k to the Prefix-TTT
+        # features while v is BF16, which the FLA kernel rejects. With FP32 weights
+        # autocast already casts each projection to BF16, so this changes storage,
+        # not values -- and it halves the activation bytes the stream costs.
+        embeds = embeds.to(torch.bfloat16)
     if labels[:, 1:].ne(IGNORE_INDEX).sum() == 0:
         raise ValueError('Preprocessing lost supervision for an audited sample; do not discard')
     if int(metadata['valid_mask'].sum(1).max()) > MAX_EXPANDED_LENGTH:

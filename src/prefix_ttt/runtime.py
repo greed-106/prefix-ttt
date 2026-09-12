@@ -77,6 +77,17 @@ def save_atomic(path, state):
     temporary.replace(path)
 
 
+def to_cpu(value):
+    """Detach a nested optimizer state onto the host before it is serialized."""
+    if torch.is_tensor(value):
+        return value.detach().cpu()
+    if isinstance(value, dict):
+        return {key: to_cpu(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(to_cpu(item) for item in value)
+    return value
+
+
 def load_trainable(model, state):
     """Restore every trainable tensor by name, rejecting any name or shape drift."""
     parameters = {n: p for n, p in model.named_parameters() if p.requires_grad}

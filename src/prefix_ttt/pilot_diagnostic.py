@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 from prefix_ttt.config import load_config
 from prefix_ttt.data_pipeline import load_manifest, build_dataset, prepare_sample
-from prefix_ttt.digests import digest_json
+from prefix_ttt.digests import digest_file, digest_json
 from prefix_ttt.model.bridge import load_checkpoint, load_tokenizer
 from prefix_ttt.model.hybrid import install_prefix_ttt
 from prefix_ttt.model.trainability import install_lora

@@ -52,16 +52,23 @@ class PrefixTTTLlava(Llava):
             if (state.get('stage') != 'B' or state.get('layout') not in ('E1', 'E2')
                     or state.get('diagnostic_only', False)):
                 raise ValueError('Expected a non-debug E1/E2 phase-B checkpoint')
-            new_parameters = (install_prefix_ttt(model, backend='fla')
-                              if state['layout'] == 'E2' else [])
-            model = install_lora(model, new_parameters=new_parameters)
-            load_trainable(model, state['trainable'])
-            # Inference always serves the folded weights: two matmuls per projection
-            # disappear. The checkpoint keeps the trained LoRA tensors, so training
-            # and any future fine-tuning still see the adapter.
-            merge_lora_weights(model)
-            # Drop PEFT's wrapper so its generate() cannot inject extra cache arguments.
-            model = model.get_base_model()
+            if state.get('trainable_mode') == 'full':
+                # Full fine-tuning carries the base weights itself, so there is no
+                # adapter to fold: the stored weights are already the served model.
+                if state['layout'] == 'E2':
+                    install_prefix_ttt(model, backend='fla')
+                model.load_state_dict(state['trainable'], strict=True)
+            else:
+                new_parameters = (install_prefix_ttt(model, backend='fla')
+                                  if state['layout'] == 'E2' else [])
+                model = install_lora(model, new_parameters=new_parameters)
+                load_trainable(model, state['trainable'])
+                # Inference always serves the folded weights: two matmuls per projection
+                # disappear. The checkpoint keeps the trained LoRA tensors, so training
+                # and any future fine-tuning still see the adapter.
+                merge_lora_weights(model)
+                # Drop PEFT's wrapper so its generate() cannot inject extra cache arguments.
+                model = model.get_base_model()
             del state
         # Never cast the whole module: preserve FP32 RoPE and new parameters.
         self._model = model.to(self._device).eval().requires_grad_(False)

@@ -604,3 +604,15 @@
 - 保留理由：`scheduler.py` 与 DDP 无关（单机 GPU 队列），本机从未启用，但后续可能使用；当前只有 `tests/test_scheduler.py`、`tests/test_supervisor.py` import 它。
 - 验证：删除后 CPU 套件 **167 passed / 0 failed**；`src/`、`tests/`、`configs/`、`README.md` 中对 `gpu_smoke` 的引用 0 命中。旧实验目录 `gpu_capacity.md` 中记录其运行命令的句子按"历史记录不回改"的约定保留。
 - 提交：单个 commit，作者 `Codex <codex@openai.com>`，推送到 `origin` 的 `h100` 分支。推送前核对：本地与远端 `refs/heads/h100` 均为 `49acbe2`（无分叉，普通快进推送，未使用 force）。
+
+## 2026-09-12 后续工作移交到新的实验目录（全量微调）
+
+- 用户提出新目标：把数据上的 LoRA 微调换成**全量微调**，仍用本机与 h100-1 共 16 卡并行，观察 benchmark
+  分数能否提高。
+- 该工作已按 `AGENTS.md` 建立新的稳定实验目录 `docs/experiments/2026-09-12-prefix-ttt-fullft/`，
+  方案与账本写入该目录（`plan.md`、`ledger.md`）。**本目录（h100）自本条起不再追加全量微调的内容**，
+  保持为环境重建 / A-B 训练 / E0-E2 评测 / 推理优化 / 代码审计阶段的完整记录。
+- 本目录的既有结论仍然有效并被新实验引用：E0 MME 1479.6432 / 349.2857、POPE 0.8548 / 0.8397；
+  E2（合并口径）MME 1429.4893 / 278.2143、POPE 0.8501 / 0.8357；E2 成本 prefill 78.9 ms、
+  TPOT 34.7 ms、峰值 13.51 GiB、缓存 147.8 MiB。
+- 本阶段未修改任何代码、未启动任何 GPU 任务。本机 8 卡与 h100-1 8 卡在 2026-09-12 01:30 均空闲。

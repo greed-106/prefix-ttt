@@ -10,6 +10,13 @@ LLM_PROJECTIONS_PER_LAYER = 7   # number of names the pattern above matches per 
 LORA_RANK, LORA_ALPHA = 32, 64
 LORA_DROPOUT, LORA_BIAS, LORA_SEED = 0.0, 'none', 43
 
+# Full fine-tuning trains the same modules the LoRA arm adapts to, plus the weights
+# underneath them. The vision tower is the only frozen module; the Prefix-TTT
+# parameters live under model.layers and are covered by the first prefix.
+FULL_FINETUNE_PREFIXES = ('model.layers.', 'model.embed_tokens.', 'model.norm.',
+                          'model.mm_projector.', 'lm_head.')
+VISION_TOWER_PREFIX = 'model.vision_tower.'
+
 
 def install_lora(model, *, rank=LORA_RANK, alpha=LORA_ALPHA, seed=LORA_SEED,
                  new_parameters=()):
@@ -60,16 +67,40 @@ def merge_lora_weights(model):
     return len(names)
 
 
-def audit_parameters(model, *, new_parameters=()):
+def enable_full_finetuning(model):
+    """Unfreeze the LLM and its projector for full fine-tuning.
+
+    Phase B full fine-tuning optimizes exactly the modules the LoRA arm adapts to,
+    so switching adapters for real weight updates is the only change. Returns the
+    number of trainable elements, which the run log records.
+    """
+    model.requires_grad_(False)
+    enabled = 0
+    for name, parameter in model.named_parameters():
+        if name.startswith(FULL_FINETUNE_PREFIXES):
+            parameter.requires_grad_(True)
+            enabled += parameter.numel()
+    if not enabled:
+        raise ValueError('No parameter matched the full fine-tuning whitelist')
+    for name, parameter in model.named_parameters():
+        if parameter.requires_grad and not name.startswith(FULL_FINETUNE_PREFIXES):
+            raise ValueError(f'Unexpected trainable parameter outside the whitelist: {name}')
+    return enabled
+
+
+def audit_parameters(model, *, new_parameters=(), allow_base=False):
     new_ids = {id(p) for p in new_parameters}
     records, seen = [], set()
     for name, parameter in model.named_parameters():
         if id(parameter) in seen:
             continue
         seen.add(id(parameter))
-        kind = 'new_module' if id(parameter) in new_ids else ('lora' if 'lora_' in name else 'frozen')
-        if parameter.requires_grad and kind == 'frozen':
-            raise ValueError(f'Unexpected trainable base parameter: {name}')
+        kind = 'new_module' if id(parameter) in new_ids else ('lora' if 'lora_' in name else 'base')
+        if kind == 'base':
+            if parameter.requires_grad and not allow_base:
+                raise ValueError(f'Unexpected trainable base parameter: {name}')
+            if not parameter.requires_grad:
+                kind = 'frozen'
         records.append(dict(name=name, shape=list(parameter.shape), dtype=str(parameter.dtype),
                             requires_grad=parameter.requires_grad,
                             optimizer_group=kind if parameter.requires_grad else None,

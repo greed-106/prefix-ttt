@@ -20,7 +20,7 @@ from prefix_ttt.model.trainability import (LORA_ALPHA, LORA_BIAS, LORA_DROPOUT, 
 from prefix_ttt.ops import ETA, LOCAL_BLOCK_SIZE, TILE_SIZE
 from prefix_ttt.ops.features import RMS_EPS
 from prefix_ttt.runtime import SEED
-from prefix_ttt.training import (ADAM_BETAS, ADAM_EPS, EFFECTIVE_BATCH_SIZE, GRAD_CLIP,
+from prefix_ttt.training import (ADAM_BETAS, ADAM_EPS, BASE_LR, EFFECTIVE_BATCH_SIZE, GRAD_CLIP,
                                  LORA_LR, MATRIX_WEIGHT_DECAY, NEW_MODULE_LR, PILOT_MIN_SAMPLES,
                                  WARMUP_FRACTION)
 from prefix_ttt.data_pipeline import CONV_TEMPLATE
@@ -62,12 +62,20 @@ def _mirrored(config):
         ('generation.num_beams', generation['num_beams'], NUM_BEAMS),
         ('generation.max_new_tokens', generation['max_new_tokens'], MAX_NEW_TOKENS),
     ]
+    if 'base_lr' in training:
+        rows.append(('training.base_lr', training['base_lr'], BASE_LR))
     return rows
 
 
-def load_config(path):
-    """Read the recipe, check every mirrored value, and return it."""
+def load_config(path, *, require_base_lr=False):
+    """Read the recipe, check every mirrored value, and return it.
+
+    ``require_base_lr`` is set by the full fine-tuning entry point: only that arm
+    reads the base learning rate, so only that arm insists the file states it.
+    """
     config = json.loads(Path(path).read_text())
+    if require_base_lr and 'base_lr' not in config['training']:
+        raise ValueError('the full fine-tuning recipe must state training.base_lr')
     for key, recorded, implemented in _mirrored(config):
         if recorded != implemented:
             raise ValueError(f'configs recipe mismatch at {key}: file={recorded!r} '

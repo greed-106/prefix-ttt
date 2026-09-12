@@ -14,6 +14,7 @@ EFFECTIVE_BATCH_SIZE = 128   # every optimizer step spans this many samples
 
 NEW_MODULE_LR = 1e-4         # phase B: the Prefix-TTT parameters
 LORA_LR = 2e-5               # phase B: the LoRA adapters
+BASE_LR = 2e-5               # phase B full fine-tuning: the pretrained base weights
 MATRIX_WEIGHT_DECAY = 0.01   # only on matrices, never on norms or gates
 WARMUP_FRACTION = 0.03
 GRAD_CLIP = 1.0
@@ -97,11 +98,12 @@ def cosine_factor(step, total_steps, warmup_fraction=WARMUP_FRACTION):
     return 0.5 * (1 + math.cos(math.pi * progress))
 
 
-def optimizer_groups(model, new_parameters=()):
+def optimizer_groups(model, new_parameters=(), allow_base=False):
     """Exact B learning rates/decay, using the final parameter audit whitelist."""
     from prefix_ttt.model.trainability import audit_parameters
-    records = audit_parameters(model, new_parameters=new_parameters)
+    records = audit_parameters(model, new_parameters=new_parameters, allow_base=allow_base)
     by_name = dict(model.named_parameters())
+    learning_rates = {'new_module': NEW_MODULE_LR, 'base': BASE_LR, 'lora': LORA_LR}
     groups = {}
     seen = set()
     for record in records:
@@ -112,7 +114,7 @@ def optimizer_groups(model, new_parameters=()):
             raise ValueError('Duplicate optimizer parameter')
         seen.add(id(parameter))
         kind = record['optimizer_group']
-        learning_rate = NEW_MODULE_LR if kind == 'new_module' else LORA_LR
+        learning_rate = learning_rates[kind]
         decay = MATRIX_WEIGHT_DECAY if parameter.ndim >= 2 else 0.0
         key = (kind, decay)
         group = groups.setdefault(key, {'params': [], 'lr': learning_rate,
