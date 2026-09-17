@@ -55,6 +55,37 @@ class LocalCache:
     seen_tokens: torch.Tensor
 
 
+def dense_local(q, k, v, need_cache=True):
+    """One Local-32 SDPA call for all-valid input starting at logical zero.
+
+    A trailing partial block is zero padded; causal masking keeps that padding
+    invisible to real queries. The fixed-size tail cache supports the existing
+    decode and segmented-prefill paths. Callers establish validity once.
+    """
+    if q.ndim != 4 or q.shape != k.shape or q.shape != v.shape:
+        raise ValueError("expected matching [B,T,H,D] inputs")
+    batch, tokens, heads, dim = q.shape
+    tail = tokens % LOCAL_BLOCK_SIZE
+    if tokens:
+        padding = (-tokens) % LOCAL_BLOCK_SIZE
+        blocks = (tokens + padding) // LOCAL_BLOCK_SIZE
+        packed = []
+        for x in (q, k, v):
+            padded = F.pad(x, (0, 0, 0, 0, 0, padding)) if padding else x
+            packed.append(padded.reshape(batch * blocks, LOCAL_BLOCK_SIZE, heads, dim).transpose(1, 2))
+        out = F.scaled_dot_product_attention(*packed, is_causal=True, dropout_p=0.0)
+        out = out.transpose(1, 2).reshape(batch, blocks * LOCAL_BLOCK_SIZE, heads, dim)[:, :tokens]
+    else:
+        out = v.clone()
+    if not need_cache:
+        return out, None
+    buffers = [F.pad(x[:, tokens - tail:], (0, 0, 0, 0, 0, LOCAL_BLOCK_SIZE - tail))
+               for x in (k, v)]
+    lengths = torch.full((batch,), tail, device=q.device, dtype=torch.long)
+    seen = torch.full((batch,), tokens, device=q.device, dtype=torch.long)
+    return out, LocalCache(*buffers, lengths, seen)
+
+
 def local_attention_decode(q, k, v, valid, cache):
     """Decode fast path: one token per row attending to its block plus itself.
 

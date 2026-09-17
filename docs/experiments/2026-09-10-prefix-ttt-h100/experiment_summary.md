@@ -249,6 +249,6 @@ Inductor 编译）、把若干逐元素算子合并到缓存写回里、用 CUDA
   `/data/shared/weights/prefix-ttt/eval-instrumented/cost/{e0,e2}-{mme,pope}.jsonl`
   （每行一条请求：输入长度、prefill 毫秒、TPOT 毫秒、逐 token 解码耗时、峰值显存、缓存三分解）
 - 训练产物：`/data/shared/weights/prefix-ttt/training/{A,E2}/`（E2 的 `latest.pt` 为 5182 步终态）
-- 绘图脚本与本文件所用图：`scripts/plot_metrics.py`、`images/cost_by_task.png`、
+- 绘图脚本与本文件所用图：`scripts/experiments/prefix_ttt_h100/plot_metrics.py`、`images/cost_by_task.png`、
   `images/cache_by_task.png`、`images/score_vs_cost.png`
 - 机器可读的汇总：`metrics-summary.json`

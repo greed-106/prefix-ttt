@@ -8,6 +8,14 @@
 - [论文解读](docs/experiments/2026-09-09-prefix-ttt/paper_reading.md)
 - [仓库审计](docs/experiments/2026-09-09-prefix-ttt/repo_audit.md)
 
+## 目录
+
+- `src/prefix_ttt/`：模型、算子、训练与运行时实现。
+- `scripts/experiments/`：按项目组织的实验启动、测量和分析工具。
+- `tests/`：生产行为回归测试。
+- `docs/experiments/`：实验账本、论文解读、总结、简要结果及 `images/` 图表。
+- `artifacts/experiments/`：本地原始结果、日志、trace、源码快照和测试报告；既有调度记录仍保留原 artifacts 路径。
+
 ## 环境与 CPU 验证
 
 项目使用 uv，普通包来自阿里镜像，torch/torchvision 来自官方 cu128。已安装 CUDA 构建不代表本机当前有 GPU。
@@ -30,6 +38,6 @@ BF16权重桥接只转换参数，保留原FP32 RoPE频率buffer。使用 `load_
 
 ## 挂卡重启后
 
-先阅读同一本主账本，检查已有队列/结果和工作树，确认实际物理GPU ID及空闲状态，再验证cu128环境。不要重复已经通过的GPU smoke或直接启动完整训练。SQLite 调度器只做单机 GPU 分配，不支持跨主机；本阶段的两机训练用 `docs/experiments/2026-09-10-prefix-ttt-h100/scripts/run_multinode.sh` 手动会合，仓库内不再保留队列与服务配置。
+先阅读同一本主账本，检查已有队列/结果和工作树，确认实际物理GPU ID及空闲状态，再验证cu128环境。不要重复已经通过的GPU smoke或直接启动完整训练。SQLite 调度器只做单机 GPU 分配，不支持跨主机；两机训练入口为 `scripts/experiments/prefix_ttt_h100/run_multinode.sh`，同项目的评测与分析脚本在相邻目录。Kernel 优化工具位于 `scripts/experiments/prefix_ttt_kernel/`，全量微调工具位于 `scripts/experiments/prefix_ttt_fullft/`。
 
 2026-09-10 起，本机与 `h100-1` 通过宿主机 NFS 共享 `/data/shared/weights/prefix-ttt`（训练产物与评测结果都放在这里），跨机任务用同一份固定清单。

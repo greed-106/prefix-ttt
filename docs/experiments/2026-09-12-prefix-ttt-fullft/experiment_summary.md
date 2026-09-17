@@ -158,5 +158,5 @@ POPE 的 0.0007 差距相当于 9000 条里的约 6 条，可视为与基座持�
   16 个优化器分片 + `steps.jsonl` + `result.json`）。
 - 评测：`/data/shared/weights/prefix-ttt/eval-full/`（E2-full）、`eval-recheck/`（同条件重测的 E2）、
   `eval-controlled/`（三臂合并口径，供绘图脚本消费），逐请求成本在各自的 `cost/` 下。
-- 本目录：`plan.md`、`ledger.md`、`mixed_precision.md`、`metrics-summary.json`、`images/`（三张图）、
-  `scripts/`（启动、评测、绘图脚本）。
+- 本目录：`plan.md`、`ledger.md`、`mixed_precision.md`、`metrics-summary.json`、`images/`（三张图）。
+- 实验工具：仓库根目录下的 `scripts/experiments/prefix_ttt_fullft/`（启动、评测、绘图脚本）。

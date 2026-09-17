@@ -1,5 +1,7 @@
 # Prefix-TTT 主账本
 
+目录迁移说明（2026-09-17）：本目录原 `evidence/` 已原样移至仓库根目录下的 `artifacts/experiments/prefix_ttt/evidence/`，逐文件字节与 SHA256 已核对。下文中的旧路径保留为运行时历史记录；实验事实不变。迁移详见 [kernel 主账本](../2026-09-11-prefix-ttt-kernel/ledger.md)。
+
 ## 2026-09-10 仅 E2 完整 B 续训准备
 
 已确认真实恢复更新：E2第392步、samples_seen50176、targets11683、loss1.11955523、裁剪前grad_norm9.242995，均有限；LoRA/新增模块LR分别1.9891392e-5/9.9456961e-5，承接391步而非重启warmup。四卡约17.5–17.9GB显存，持续计算。当前只有E2完整B续训运行，E1没有训练排队。目标累计5182步/663248样本，当前Supervisor持久托管。

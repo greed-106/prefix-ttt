@@ -1,4 +1,0 @@
-{"rank": 0, "device": "NVIDIA A40", "world_size": 4, "sum": 10.0, "payload_bytes": 67108864, "mean_allreduce_ms": 4.764370014891028}
-{"rank": 3, "device": "NVIDIA A40", "world_size": 4, "sum": 10.0, "payload_bytes": 67108864, "mean_allreduce_ms": 4.767147405073047}{"rank": 1, "device": "NVIDIA A40", "world_size": 4, "sum": 10.0, "payload_bytes": 67108864, "mean_allreduce_ms": 4.769745795056224}
-{"rank": 2, "device": "NVIDIA A40", "world_size": 4, "sum": 10.0, "payload_bytes": 67108864, "mean_allreduce_ms": 4.780607298016548}
-

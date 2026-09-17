@@ -1,5 +1,7 @@
 # Prefix-TTT 全量微调实验主账本
 
+目录迁移说明（2026-09-17）：原 `scripts/` 的 3 个工具已移至仓库根目录下的 `scripts/experiments/prefix_ttt_fullft/`；训练脚本的跨项目引用已更新，图像仍归档本目录 `images/`。语法和 CLI 验证通过，没有重新训练或评测。下文旧路径保留为历史记录，迁移详见 [kernel 主账本](../2026-09-11-prefix-ttt-kernel/ledger.md)。
+
 本目录 `docs/experiments/2026-09-12-prefix-ttt-fullft/` 是「把 E2 的 LoRA 微调换成全量微调」
 这一实验项目的稳定目录，启动日期 2026-09-12。跨日继续时持续更新本账本，不再另建目录。
 

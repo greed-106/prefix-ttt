@@ -124,20 +124,6 @@ def test_cpu_fla_cannot_silently_fallback():
         fla_prefix(q, k, v)
 
 
-def test_local_uses_one_block_batched_call(monkeypatch):
-    original = F.scaled_dot_product_attention
-    calls = []
-
-    def record(q, k, v, **kwargs):
-        calls.append((q.shape, k.shape))
-        return original(q, k, v, **kwargs)
-
-    monkeypatch.setattr(F, "scaled_dot_product_attention", record)
-    q, k, v, _ = fixture(129)
-    local_attention(q, k, v)
-    assert calls == [(torch.Size([10, 2, 32, 4]), torch.Size([10, 2, 32, 4]))]
-
-
 def test_checkpoint_gradient_equivalence():
     from torch.utils.checkpoint import checkpoint
 

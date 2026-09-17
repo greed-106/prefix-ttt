@@ -11,6 +11,7 @@ class TransformersHybridCache(Cache):
         self.storage = HybridCache(batch_size, full_attention_layers, device)
         self.valid_history = torch.zeros(batch_size, 0, dtype=torch.bool, device=device)
         self.current_valid = None
+        self._dense_prefill = False
 
     def get_seq_length(self, layer_idx=0):
         return self.valid_history.shape[1]
@@ -22,6 +23,11 @@ class TransformersHybridCache(Cache):
         if self.current_valid is not None:
             raise RuntimeError('Cache forward already in progress; discard cache after a failed forward')
         self.current_valid = self.storage.active_mask(valid)
+        # One request-level check replaces valid-token packing in every TTT
+        # layer. Never assume that an explicitly supplied mask has no holes.
+        self._dense_prefill = (valid.is_cuda and not torch.is_grad_enabled()
+            and self.valid_history.shape[1] == 0 and valid.shape[1] > 1
+            and bool(self.current_valid.all().item()))
         positions = self.storage.seen_tokens[:, None] + self.current_valid.long().cumsum(1) - 1
         positions = positions.clamp_min(0).masked_fill(~self.current_valid, 0)
         return torch.cat((self.valid_history, self.current_valid), 1), positions
@@ -32,6 +38,7 @@ class TransformersHybridCache(Cache):
         self.storage.advance(self.current_valid)
         self.valid_history = torch.cat((self.valid_history, self.current_valid), 1)
         self.current_valid = None
+        self._dense_prefill = False
 
     def update(self, key_states, value_states, layer_idx, cache_kwargs=None):
         if layer_idx not in self.storage.full_attention_layers or self.current_valid is None:

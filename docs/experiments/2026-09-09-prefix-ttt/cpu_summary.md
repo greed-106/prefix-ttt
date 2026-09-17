@@ -6,7 +6,7 @@
 
 - 任务书、主账本、论文解读、源码/环境审计、参数清单、重启交接文档已建立。
 - uv环境锁定Python3.10、torch2.7.1+cu128、torchvision0.22.1+cu128、Transformers4.51.3、PEFT0.15.2、Accelerate1.6.0及指定FLA commit。普通包用阿里源，PyTorch用官方cu128；未修改全局Python环境。
-- 最终统一测试 **145通过、4项GPU跳过**，见 [测试日志](evidence/pytest.log) 和 [JUnit结果](evidence/pytest-results.xml)。覆盖算子输出/全部输入梯度/因果/分段、真实块批量Local、LoRA、tiny图文训练、optimizer和RNG恢复、混合缓存greedy以及SQLite恢复。
+- 最终统一测试 **145通过、4项GPU跳过**，见 [测试日志](../../../artifacts/experiments/prefix_ttt/evidence/pytest.log) 和 [JUnit结果](../../../artifacts/experiments/prefix_ttt/evidence/pytest-results.xml)。覆盖算子输出/全部输入梯度/因果/分段、真实块批量Local、LoRA、tiny图文训练、optimizer和RNG恢复、混合缓存greedy以及SQLite恢复。
 - tiny图文生成确认视觉编码只执行一次，之后query长度为1；测试了首层TTT、不同anchor布局、左右padding、异长batch、finished停止写和重排。这不是完整7B或FLA GPU结论。
 - 生产规格meta参数审计：新增27,131,904、LoRA79,953,920，共107,085,824个可训练参数。基座冻结，不将S加入optimizer。
 

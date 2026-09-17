@@ -1,8 +1,0 @@
-2026-09-10 00:50:24,976 INFO RPC interface 'supervisor' initialized
-2026-09-10 00:50:24,976 CRIT Server 'unix_http_server' running without any HTTP authentication checking
-2026-09-10 00:50:24,977 INFO daemonizing the supervisord process
-2026-09-10 00:50:24,978 INFO supervisord started with pid 8472
-2026-09-10 00:50:25,502 INFO spawned: 'queue' with pid 8477
-2026-09-10 00:50:25,502 INFO success: queue entered RUNNING state, process has stayed up for > than 0 seconds (startsecs)
-2026-09-10 00:50:25,938 INFO waiting for queue to stop
-2026-09-10 00:50:25,975 WARN stopped: queue (exit status 130)

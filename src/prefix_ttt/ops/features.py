@@ -31,6 +31,7 @@ class FeatureReadout(nn.Module):
         heads = a.shape[0]
         self.register_buffer('a_phi_inference', self.packed_phi_inference[:heads], persistent=False)
         self.register_buffer('b_phi_inference', self.packed_phi_inference[heads:2 * heads], persistent=False)
+        self.register_buffer('ab_phi_inference', torch.cat((a, b), dim=-1), persistent=False)
         self.register_buffer('gate_weight_inference', self.gate_weight.to(torch.bfloat16), persistent=False)
 
     def inference_weight(self, name, x):
@@ -63,6 +64,31 @@ class FeatureReadout(nn.Module):
             qa, qb, ka, kb = projected.reshape(4, 1, 1, 32, 128).unbind(0)
             return silu_rms(qa, qb), silu_rms(ka, kb)
         return self.features(q), self.features(k)
+
+    def features_prefill(self, q, k):
+        """Project Q/K into prepared A/B columns with the same rounding points.
+
+        The serving copy is [H,D,2D]; FP32 masters and the fused SiLU/product/RMS
+        stay unchanged. Unsupported inputs retain the autograd feature path.
+        """
+        if not (q.is_cuda and not torch.is_grad_enabled()
+                and q.dtype == k.dtype == torch.bfloat16
+                and q.shape == k.shape and q.ndim == 4 and q.shape[-1] == 128
+                and (not torch.is_autocast_enabled('cuda')
+                     or torch.get_autocast_dtype('cuda') == torch.bfloat16)
+                and hasattr(self, 'ab_phi_inference')):
+            return self.features(q), self.features(k)
+        from prefix_ttt.ops.fused_features import silu_rms
+
+        batch, tokens, heads, dim = q.shape
+        outputs = []
+        for x in (q, k):
+            rows = x.permute(2, 0, 1, 3).reshape(heads, batch * tokens, dim)
+            projected = torch.bmm(rows, self.ab_phi_inference)
+            projected = projected.reshape(heads, batch, tokens, 2 * dim).permute(1, 2, 0, 3)
+            a, b = projected.split(dim, dim=-1)
+            outputs.append(silu_rms(a, b))
+        return tuple(outputs)
 
     def readout(self, x, memory):
         gate = F.linear(x, self.inference_weight('gate_weight', x))

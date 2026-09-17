@@ -50,6 +50,6 @@
 
 ## 证据
 
-本轮集成日志与测试配置/状态数据库/消费者日志归档于本目录`evidence/supervisor/`；原始日志位于`artifacts/supervisor/`。三个最终测试目录也原样保留在`/var/tmp/prefix-ttt-supervisor-test-*`，路径见integration-final.log。这些是隔离的CPU测试队列，不是正式训练数据库，不得拿来续跑模型训练。
+本轮集成日志与测试配置/状态数据库/消费者日志归档于仓库根目录下的 `artifacts/experiments/prefix_ttt/evidence/supervisor/`；原始日志位于`artifacts/supervisor/`。三个最终测试目录也原样保留在`/var/tmp/prefix-ttt-supervisor-test-*`，路径见integration-final.log。这些是隔离的CPU测试队列，不是正式训练数据库，不得拿来续跑模型训练。
 
 systemd样例没有删除，仅不作为当前容器的必需前置。正式训练runner与E0/生成等验收仍按原计划推进；Supervisor部署成功不代表正式训练已开始。

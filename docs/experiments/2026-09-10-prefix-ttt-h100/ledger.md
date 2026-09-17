@@ -1,5 +1,7 @@
 # Prefix-TTT H100 主机主账本
 
+目录迁移说明（2026-09-17）：原 `scripts/` 的 7 个工具已移至仓库根目录下的 `scripts/experiments/prefix_ttt_h100/`，原 `evidence/` 移至 `artifacts/experiments/prefix_ttt_h100/evidence/`；图片仍在本目录 `images/`。已修复工具路径并通过 Shell/Python 语法、CLI 检查，没有重新执行实验。下文旧路径保留为历史记录，迁移详见 [kernel 主账本](../2026-09-11-prefix-ttt-kernel/ledger.md)。
+
 本目录 `docs/experiments/2026-09-10-prefix-ttt-h100/` 是本项目在**本机 `cucloud-server3`**（用户 `mjyang`，8×H100 80GB，裸金属主机）的稳定实验目录，启动日期 2026-09-10。本机的后续记录持续写入本账本，不按自然日另建目录。
 
 前一阶段记录位于 `docs/experiments/2026-09-09-prefix-ttt/`，对应**另一台机器上的早期环境**（用户 `ymj`，四张 A40 48GB，路径 `/data/ymj/code/llm/prefix-ttt`）。那份账本保持原样作为历史，不追加本机内容；2026-09-10 迁移时已将本机环境审计从旧目录移至本目录 `environment.lock.json`，旧目录未被修改。两台机器是各自独立的检出，`data/`、`artifacts/`、`preference/` 不共享。

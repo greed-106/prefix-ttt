@@ -223,7 +223,7 @@ parameters but got both torch.BFloat16Tensor and torch.FloatTensor
 3. **8 卡单机 2 步冒烟** → 验证：loss / grad_norm 有限；ZeRO 回写后各 rank 参数逐位一致。
 4. **16 卡跨机 3 步冒烟**（`run_multinode.sh`，两端）→ 验证：rendezvous、跨机 all-reduce 与参数广播、
    共享 NFS 落盘与重载全部可用。
-5. **同步 h100-1 代码** → 验证：两端 `src/`、`configs/`、`scripts/` 的 SHA256 逐一相同。同步前先把
+5. **同步 h100-1 代码** → 验证：两端 `src/`、`configs/`、`scripts/experiments/prefix_ttt_fullft/` 的 SHA256 逐一相同。同步前先把
    h100-1 的 6 个脏文件打包备份到 `/data/shared/weights/prefix-ttt/scratch/h100-1-dirty-20260912.tar.gz`，
    再 `git fetch && git checkout -f h100`。已核实这些脏文件是本机重构中途快照被 rsync 过去的残留
    （`configs/base.json` 与本机 HEAD 完全一致；其余 5 个不匹配任何历史提交），不是第三方改动。
@@ -253,7 +253,8 @@ parameters but got both torch.BFloat16Tensor and torch.FloatTensor
 - 训练：`/data/shared/weights/prefix-ttt/training/A-full/`、`training/E2-full/`（`latest.pt`、
   `steps.jsonl`、`run.json`、`result.json`）。
 - 评测：`/data/shared/weights/prefix-ttt/eval-full/{e2full-mme,e2full-pope}/` 与 `cost/` 逐请求记录。
-- 文档：本目录 `plan.md`、`ledger.md`、`experiment_summary.md`、`metrics-summary.json`、`images/`、`scripts/`。
+- 文档：本目录 `plan.md`、`ledger.md`、`experiment_summary.md`、`metrics-summary.json`、`images/`。
+- 实验工具：仓库根目录下的 `scripts/experiments/prefix_ttt_fullft/`。
 - 代码：`sft.py` 的 `full` 分支、`trainability` 扩展、新配置与测试；E1/E2 路径零改动。
 
 ## 9. 明确不做

@@ -6,7 +6,7 @@ from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
 from prefix_ttt.ops.features import FeatureReadout
 from prefix_ttt.ops import TILE_SIZE
 from prefix_ttt.ops.local import (local_attention, local_attention_cached,
-                                 local_attention_decode, LocalCache)
+                                 local_attention_decode, dense_local, LocalCache)
 from prefix_ttt.ops.reference import chunk_prefix
 from prefix_ttt.ops.fla import fla_prefix, recurrent_step
 from prefix_ttt.ops.fused_features import readout as fused_readout
@@ -68,13 +68,19 @@ class PrefixTTTAttention(nn.Module):
         q, k = q.transpose(1, 2), k.transpose(1, 2)
         old = past_key_value.storage.layers.get(self.layer_idx) if caching else None
         initial_state = None if old is None else old.state
+        dense_prefill = (caching and self.backend == 'fla' and old is None
+                         and q.dtype == torch.bfloat16 and self.head_dim == 128
+                         and past_key_value._dense_prefill)
         if caching:
             valid = past_key_value.current_valid
             local_cache = None if old is None else LocalCache(old.key, old.value,
                 old.local_position, past_key_value.storage.seen_tokens)
-            local, final_local = (local_attention_decode(q, k, v, valid, local_cache)
-                                  if t == 1 and local_cache is not None
-                                  else local_attention_cached(q, k, v, valid, local_cache))
+            if dense_prefill:
+                local, final_local = dense_local(q, k, v)
+            elif t == 1 and local_cache is not None:
+                local, final_local = local_attention_decode(q, k, v, valid, local_cache)
+            else:
+                local, final_local = local_attention_cached(q, k, v, valid, local_cache)
         else:
             local = local_attention(q, k, v, valid)
         # New parameters remain FP32 masters. Inference cannot rely on the
@@ -82,7 +88,8 @@ class PrefixTTTAttention(nn.Module):
         amp_dtype = q.dtype if q.dtype in (torch.bfloat16, torch.float16) else torch.bfloat16
         amp_enabled = q.dtype in (torch.bfloat16, torch.float16)
         with torch.autocast(device_type=q.device.type, dtype=amp_dtype, enabled=amp_enabled):
-            qf, kf = self.prefix_ttt.features_pair(q, k)
+            qf, kf = (self.prefix_ttt.features_prefill(q, k) if dense_prefill
+                      else self.prefix_ttt.features_pair(q, k))
         if caching and t == 1:
             if fused:
                 memory, state = recurrent_decode(qf, kf, v, initial_state, valid)
@@ -93,7 +100,8 @@ class PrefixTTTAttention(nn.Module):
                                          valid=valid, tile_size=self.tile_size)
         else:
             memory, state = fla_prefix(qf, kf, v, initial_state=initial_state,
-                valid=valid, tile_size=self.tile_size, need_final_state=caching)
+                valid=None if dense_prefill else valid,
+                tile_size=self.tile_size, need_final_state=caching)
         if caching:
             past_key_value.storage.set_layer(self.layer_idx, LayerState(state=state,
                 key=final_local.key, value=final_local.value, local_position=final_local.lengths))

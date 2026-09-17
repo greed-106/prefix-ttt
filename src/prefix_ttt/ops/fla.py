@@ -19,20 +19,29 @@ def _run_kernel(q, k, v, state, need_final_state, tile_size, cu_seqlens):
     try:
         if tile_size == TILE_SIZE:
             from fla.ops.linear_attn import chunk_linear_attn
-            return chunk_linear_attn(q=q, k=k, v=v * ETA, scale=1.0,
-                                     initial_state=state, output_final_state=need_final_state,
-                                     normalize=False, cu_seqlens=cu_seqlens)
-        from fla.ops.simple_gla import chunk_simple_gla
-        return chunk_simple_gla(q=q, k=k, v=v * ETA, g=None, g_gamma=None,
-                                scale=1.0, initial_state=state, output_final_state=need_final_state,
-                                cu_seqlens=cu_seqlens, chunk_size=tile_size)
+            out, final = chunk_linear_attn(q=q, k=k, v=v * ETA, scale=1.0,
+                                          initial_state=state, output_final_state=need_final_state,
+                                          normalize=False, cu_seqlens=cu_seqlens)
+        else:
+            from fla.ops.simple_gla import chunk_simple_gla
+            out, final = chunk_simple_gla(q=q, k=k, v=v * ETA, g=None, g_gamma=None,
+                                         scale=1.0, initial_state=state, output_final_state=need_final_state,
+                                         cu_seqlens=cu_seqlens, chunk_size=tile_size)
     except ImportError as exc:
         raise RuntimeError("locked FLA backend is unavailable; no fallback is permitted") from exc
+    if need_final_state and final.dtype != torch.float32:
+        raise RuntimeError("FLA returned non-FP32 final state; backend contract violated")
+    return out, final
 
 
 def fla_prefix(q, k, v, initial_state=None, need_final_state=True, valid=None,
                tile_size=TILE_SIZE):
-    """FLA prefill: dense masked inference, packed independent training rows."""
+    """FLA prefill: dense inference, packed independent training rows.
+
+    valid=None means every token is valid. Inference passes such inputs straight
+    to the kernel; callers need not materialize or reduce an all-true mask.
+    Explicit masks retain zero-write inference and packed training semantics.
+    """
     if not q.is_cuda:
         raise RuntimeError("FLA Prefix-TTT requires a CUDA GPU; CPU/reference only is not GPU validation")
     if q.ndim != 4 or q.shape != k.shape or q.shape[:3] != v.shape[:3]:
@@ -42,6 +51,12 @@ def fla_prefix(q, k, v, initial_state=None, need_final_state=True, valid=None,
     state_shape = (q.shape[0], q.shape[2], q.shape[3], v.shape[3])
     if initial_state is not None and (initial_state.dtype != torch.float32 or initial_state.shape != state_shape):
         raise ValueError("FLA initial state must use FP32 storage")
+    if valid is None and not torch.is_grad_enabled():
+        if q.shape[1] == 0:
+            final = (q.new_zeros(state_shape, dtype=torch.float32)
+                     if initial_state is None else initial_state)
+            return v.clone(), final if need_final_state else None
+        return _run_kernel(q, k, v, initial_state, need_final_state, tile_size, None)
     if valid is None:
         valid = torch.ones(q.shape[:2], dtype=torch.bool, device=q.device)
     if valid.shape != q.shape[:2] or valid.dtype != torch.bool:
@@ -49,10 +64,7 @@ def fla_prefix(q, k, v, initial_state=None, need_final_state=True, valid=None,
     if not torch.is_grad_enabled() and q.shape[1] > 0:
         # Zero writes preserve state; physical padding need not be packed away.
         masked = (x.masked_fill(~valid[..., None, None], 0) for x in (q, k, v))
-        out, final = _run_kernel(*masked, initial_state, need_final_state, tile_size, None)
-        if need_final_state and final.dtype != torch.float32:
-            raise RuntimeError("FLA returned non-FP32 final state; backend contract violated")
-        return out, final
+        return _run_kernel(*masked, initial_state, need_final_state, tile_size, None)
     (pq, pk, pv), active, cu_seqlens = _pack(q, k, v, valid)
     base_state = (q.new_zeros(state_shape, dtype=torch.float32)
                   if initial_state is None else initial_state)
@@ -63,8 +75,6 @@ def fla_prefix(q, k, v, initial_state=None, need_final_state=True, valid=None,
     out = v.new_zeros(v.shape)
     out[valid] = packed_out[0]
     if need_final_state:
-        if final.dtype != torch.float32:
-            raise RuntimeError("FLA returned non-FP32 final state; backend contract violated")
         final = base_state.index_copy(0, active, final)
     return out, final
 
