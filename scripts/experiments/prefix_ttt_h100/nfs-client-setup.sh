@@ -24,6 +24,7 @@ exports_here() {
     command -v exportfs >/dev/null && exportfs -s 2>/dev/null | grep -qF "$SHARE"
 }
 
+client_mount=0
 if mountpoint -q "$SHARE"; then
     current=$(findmnt -no SOURCE --mountpoint "$SHARE")
     if [ "$current" != "$SOURCE" ]; then
@@ -31,6 +32,7 @@ if mountpoint -q "$SHARE"; then
         exit 1
     fi
     echo "$SHARE is already mounted from $current"
+    client_mount=1
 elif exports_here; then
     echo "$SHARE is exported by this host; using the local directory, nothing to mount"
 else
@@ -43,14 +45,18 @@ else
     mkdir -p "$SHARE"
     mount -t nfs "$SOURCE" "$SHARE"
     echo "mounted $SOURCE at $SHARE"
-    if [ "$PERSIST" = 1 ]; then
-        LINE="$SOURCE $SHARE nfs defaults,_netdev 0 0"
-        if grep -qF "$SOURCE $SHARE" /etc/fstab; then
-            echo "present: fstab entry"
-        else
-            echo "$LINE" >>/etc/fstab
-            echo "added:   fstab entry ($LINE)"
-        fi
+    client_mount=1
+fi
+
+# Persistence is checked separately from mounting, so a node whose mount predates
+# this script also gets the entry; otherwise a reboot silently drops the share.
+if [ "$client_mount" = 1 ] && [ "$PERSIST" = 1 ]; then
+    LINE="$SOURCE $SHARE nfs defaults,_netdev 0 0"
+    if grep -qF "$SOURCE $SHARE" /etc/fstab; then
+        echo "present: fstab entry"
+    else
+        echo "$LINE" >>/etc/fstab
+        echo "added:   fstab entry ($LINE)"
     fi
 fi
 
