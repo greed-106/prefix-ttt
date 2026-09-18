@@ -140,6 +140,36 @@ no world-size factor may be applied here.
     return per_token.masked_fill(~mask, 0).sum() / global_target_count * temperature ** 2
 
 
+def all_reduce_gradients(parameters, world_size):
+    """Sum every gradient across ranks with one collective per (dtype, device).
+
+    The manual loop issued one all_reduce and one isfinite sync per trainable
+    tensor; with ~700 tensors spread over three hosts that per-call latency
+    dominated the step. Concatenating a bucket changes nothing arithmetically --
+    summing a flat buffer is the same sum -- while turning hundreds of small
+    collectives into a handful. Gradients are never averaged here: the training
+    loop normalises by the global token count and divides nowhere else.
+    """
+    if world_size <= 1:
+        return
+    import torch.distributed as dist
+    buckets = {}
+    for parameter in parameters:
+        if parameter.grad is None:
+            raise ValueError("every trainable parameter needs a gradient before reduction")
+        buckets.setdefault((parameter.grad.dtype, parameter.grad.device), []).append(parameter.grad)
+    for bucket in buckets.values():
+        flat = torch.cat([grad.reshape(-1) for grad in bucket])
+        dist.all_reduce(flat)
+        if not torch.isfinite(flat).all():
+            raise FloatingPointError("Nonfinite gradient after all-reduce")
+        offset = 0
+        for grad in bucket:
+            count = grad.numel()
+            grad.copy_(flat[offset:offset + count].view_as(grad))
+            offset += count
+
+
 def trajectory(train_samples, effective_batch_size=EFFECTIVE_BATCH_SIZE,
                pilot_min_samples=PILOT_MIN_SAMPLES):
     if train_samples <= 0 or effective_batch_size <= 0:

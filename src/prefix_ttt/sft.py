@@ -22,8 +22,8 @@ from prefix_ttt.model.labels import IGNORE_INDEX
 from prefix_ttt.model.trainability import install_lora, enable_full_finetuning, audit_parameters
 from prefix_ttt.optim import MasterWeightAdamW
 from prefix_ttt.training import (ADAM_BETAS, ADAM_EPS, EFFECTIVE_BATCH_SIZE, GRAD_CLIP, KD_TEMPERATURE,
-                                 accumulation_steps, cosine_factor, kd_loss, optimizer_groups,
-                                 token_normalized_ce, trajectory)
+                                 accumulation_steps, all_reduce_gradients, cosine_factor, kd_loss,
+                                 optimizer_groups, token_normalized_ce, trajectory)
 
 
 def main():
@@ -275,10 +275,9 @@ def main():
                     if group:
                         raise RuntimeError('Missing trainable gradient')
                     parameter.grad = torch.zeros_like(parameter)
-                if world > 1:
-                    dist.all_reduce(parameter.grad)
-                if not torch.isfinite(parameter.grad).all():
-                    raise FloatingPointError('Nonfinite SFT gradient')
+            # One collective per dtype instead of one per tensor: on three hosts the
+            # per-call latency of hundreds of small all-reduces dominated the step.
+            all_reduce_gradients(parameters, world)
             norm = torch.nn.utils.clip_grad_norm_(parameters, GRAD_CLIP)
             for target in optimizers:
                 target.step()
