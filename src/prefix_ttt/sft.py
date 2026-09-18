@@ -241,7 +241,11 @@ def main():
                 dist.all_reduce(targets)
             for target in optimizers:
                 target.zero_grad(set_to_none=True)
+            # CE and KL are accumulated separately: their split is what exposed the
+            # world-size scaling defect in the first round's distillation term.
             loss_sum = torch.zeros((), device=device)
+            ce_sum = torch.zeros((), device=device)
+            kl_sum = torch.zeros((), device=device)
             for staged in group:
                 batch = {key: value.to(device) for key, value in staged.items()}
                 labels = batch.pop('labels')
@@ -254,15 +258,18 @@ def main():
                 with torch.autocast('cuda', dtype=torch.bfloat16):
                     result = model(**batch, use_cache=False)
                     # Manual SUM below, hence no DDP world-size multiplication.
-                    loss = token_normalized_ce(result.logits, labels, int(targets))
-                    if teacher_logits is not None:
-                        loss = loss + kd_weight * kd_loss(result.logits, teacher_logits, labels,
-                                                          int(targets), kd_temperature)
+                    ce = token_normalized_ce(result.logits, labels, int(targets))
+                    kl = (kd_weight * kd_loss(result.logits, teacher_logits, labels,
+                                              int(targets), kd_temperature)
+                          if teacher_logits is not None else torch.zeros((), device=device))
+                    loss = ce + kl
                 if not torch.isfinite(loss):
                     raise FloatingPointError('Nonfinite SFT loss')
                 loss.backward()
                 loss_sum += loss.detach()
-                del result, loss, batch, teacher_logits
+                ce_sum += ce.detach()
+                kl_sum += kl.detach()
+                del result, loss, ce, kl, batch, teacher_logits
             for parameter in parameters:
                 if parameter.grad is None:
                     if group:
@@ -281,8 +288,11 @@ def main():
             cursor = min(cursor + EFFECTIVE_BATCH_SIZE, len(manifest['train']))
             if world > 1:
                 dist.all_reduce(loss_sum)
+                dist.all_reduce(ce_sum)
+                dist.all_reduce(kl_sum)
             if rank == 0:
                 record = dict(step=step, samples_seen=cursor, targets=int(targets), loss=float(loss_sum),
+                              loss_ce=float(ce_sum), loss_kl=float(kl_sum),
                               grad_norm=float(norm), seconds=time.perf_counter() - started,
                               learning_rates=scheduler.get_last_lr())
                 with (output / 'steps.jsonl').open('a') as handle:
