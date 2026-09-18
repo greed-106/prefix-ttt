@@ -18,11 +18,28 @@ NODES=(
 
 [ -w "$HOSTS_FILE" ] || { echo "error: $HOSTS_FILE is not writable; run with sudo" >&2; exit 1; }
 
+resolved_address() {
+    getent hosts "$1" 2>/dev/null | awk 'NR==1{print $1}'
+}
+
 for entry in "${NODES[@]}"; do
     read -r address names <<<"$entry"
-    marker=${names%% *}
-    if grep -qw "$marker" "$HOSTS_FILE"; then
-        echo "present: $entry"
+    # Key on the SHORT name, which is what the training commands use. It is not the
+    # first field: the stock 127.0.1.1 line already carries the long hostname, so
+    # keying on that calls every entry "present" and adds nothing.
+    alias=${names##* }
+    if [ "$HOSTS_FILE" = /etc/hosts ]; then
+        found=$(resolved_address "$alias")
+        if [ "$found" = "$address" ]; then
+            echo "present: $entry"
+            continue
+        fi
+        if [ -n "$found" ]; then
+            echo "warning: $alias resolves to $found, not $address; fix that line by hand" >&2
+            continue
+        fi
+    elif grep -qw "$alias" "$HOSTS_FILE"; then
+        echo "present: $entry (dry run)"
         continue
     fi
     printf '%s  %s\n' "$address" "$names" >>"$HOSTS_FILE"
@@ -33,9 +50,11 @@ if [ "$HOSTS_FILE" = /etc/hosts ]; then
     echo "--- name resolution ---"
     for entry in "${NODES[@]}"; do
         read -r address names <<<"$entry"
-        getent hosts "${names##* }" >/dev/null || { echo "error: ${names##* } does not resolve" >&2; exit 1; }
+        alias=${names##* }
+        [ "$(resolved_address "$alias")" = "$address" ] || {
+            echo "error: $alias does not resolve to $address" >&2; exit 1; }
     done
-    echo "all names resolve"
+    echo "all names resolve to their pinned addresses"
 else
     echo "dry run against $HOSTS_FILE: skipping resolution check"
 fi
