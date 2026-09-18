@@ -19,7 +19,12 @@ NODES=(
 [ -w "$HOSTS_FILE" ] || { echo "error: $HOSTS_FILE is not writable; run with sudo" >&2; exit 1; }
 
 resolved_address() {
-    getent hosts "$1" 2>/dev/null | awk 'NR==1{print $1}'
+    # A name that does not resolve makes getent exit non-zero; under `set -e` a
+    # failing command substitution would abort the whole script silently, which is
+    # exactly the case this function has to report. Always exit 0 here.
+    local answer
+    answer=$(getent hosts "$1" 2>/dev/null || true)
+    printf '%s' "$answer" | awk 'NR==1{print $1}'
 }
 
 for entry in "${NODES[@]}"; do
