@@ -267,9 +267,12 @@ def test_hybrid_segmented_prefill_and_decode(side, anchors):
             other = one.past_key_values.storage.layers[index]
             if state.state is not None:
                 torch.testing.assert_close(state.state, other.state, rtol=1e-4, atol=1e-5)
-                assert state.key.shape[1] == 32
-            torch.testing.assert_close(state.key, other.key, rtol=1e-4, atol=1e-5)
-            torch.testing.assert_close(state.value, other.value, rtol=1e-4, atol=1e-5)
+                # A pure Prefix-TTT layer keeps no window at all.
+                if state.key is not None:
+                    assert state.key.shape[1] == 32
+            if state.key is not None:
+                torch.testing.assert_close(state.key, other.key, rtol=1e-4, atol=1e-5)
+                torch.testing.assert_close(state.value, other.value, rtol=1e-4, atol=1e-5)
         # Physical KV grows for batching, but finished effective state is fixed.
         cache.storage.mark_finished(torch.tensor([True, False]))
         before = cache.storage.layers[0].select(torch.tensor([0]))
@@ -279,9 +282,61 @@ def test_hybrid_segmented_prefill_and_decode(side, anchors):
         after = cache.storage.layers[0]
         if before.state is not None:
             torch.testing.assert_close(after.state[:1], before.state, rtol=0, atol=0)
-        torch.testing.assert_close(after.key[:1, :before.key.shape[1]], before.key, rtol=0, atol=0)
+        if before.key is not None:
+            torch.testing.assert_close(after.key[:1, :before.key.shape[1]], before.key, rtol=0, atol=0)
         cache.batch_select_indices(torch.tensor([1, 0]))
         assert cache.storage.finished.tolist() == [False, True]
+
+
+def test_pure_prefix_ttt_has_no_softmax_attention_and_no_kv():
+    from torch.utils._python_dispatch import TorchDispatchMode
+
+    class CountSDPA(TorchDispatchMode):
+        def __init__(self):
+            self.names = []
+
+        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+            if 'scaled_dot_product' in str(func):
+                self.names.append(str(func))
+            return func(*args, **(kwargs or {}))
+
+    model = tiny_model()
+    install_prefix_ttt(model, backend='reference', full_attention_layers=())
+    assert model.config.prefix_ttt_layers == list(range(2))
+    ids = torch.randint(1, 48, (1, 16))
+    valid = torch.ones_like(ids, dtype=torch.bool)
+    counter = CountSDPA()
+    with torch.no_grad(), counter:
+        output = model(ids, attention_mask=valid, use_cache=True)
+    assert counter.names == []
+    cache = output.past_key_values
+    # Only FP32 recurrent state: two layers of [1, 4, 8, 8] at four bytes.
+    state_bytes = sum(layer.state.numel() * layer.state.element_size()
+                      for layer in cache.storage.layers.values())
+    assert state_bytes == 2 * 1 * 4 * 8 * 8 * 4
+    for layer in cache.storage.layers.values():
+        assert layer.state.dtype == torch.float32
+        assert layer.key is None and layer.value is None
+
+
+def test_late_answer_loss_reaches_early_visual_writes():
+    model = tiny_model()
+    install_prefix_ttt(model, backend='reference', full_attention_layers=())
+    with torch.no_grad():
+        for layer in model.model.layers:
+            layer.self_attn.prefix_ttt.gate_weight.normal_(std=.02)
+    ids = torch.randint(1, 48, (1, 12))
+    valid = torch.ones_like(ids, dtype=torch.bool)
+    # A single "image" prefix followed by an answer that is the only supervision.
+    embeds = model.get_model().embed_tokens(ids).detach().requires_grad_(True)
+    labels = torch.full_like(ids, -100)
+    labels[:, -3:] = ids[:, -3:]
+    loss = model(inputs_embeds=embeds, labels=labels, attention_mask=valid,
+                 prefix_valid_mask=valid, use_cache=False).loss
+    loss.backward()
+    assert embeds.grad[:, :6].abs().sum() > 0, 'answer loss must reach the early writes'
+    gates = [layer.self_attn.prefix_ttt.gate_weight for layer in model.model.layers]
+    assert all(gate.grad is not None and gate.grad.abs().sum() > 0 for gate in gates)
 
 
 def test_hybrid_greedy_images_once_and_new_token_only():

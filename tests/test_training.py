@@ -4,7 +4,8 @@ import pytest
 import torch
 
 from prefix_ttt.training import (accumulation_steps, shifted_target_count,
-    token_normalized_ce, residual_transfer_loss, trajectory, cosine_factor, optimizer_groups)
+    token_normalized_ce, full_attention_transfer_loss, visual_transfer_loss, visual_queries,
+    trajectory, cosine_factor, optimizer_groups)
 
 
 def test_accumulation_matches_large_batch_and_ddp_mean():
@@ -32,16 +33,44 @@ def test_accumulation_matches_large_batch_and_ddp_mean():
 
 def test_stage_a_balances_modalities_and_detaches_teacher():
     full = torch.ones(2, 4, 2, 3, requires_grad=True)
-    local = torch.zeros_like(full, requires_grad=True)
     readout = torch.zeros_like(full, requires_grad=True)
     visual = torch.tensor([[True, False, False, False], [False, False, False, False]])
     valid = torch.tensor([[True, True, True, True], [True, True, False, False]])
-    loss = residual_transfer_loss(readout, full, local, visual, valid)
+    loss = full_attention_transfer_loss(readout, full, visual, valid)
     torch.testing.assert_close(loss, torch.full((2,), 1 / (1 + 1e-6)))
     loss.sum().backward()
-    assert full.grad is None and local.grad is None
+    assert full.grad is None
     assert readout.grad[0, 0].abs().sum() == pytest.approx(readout.grad[0, 1:].abs().sum().item())
     assert readout.grad[1, 2:].count_nonzero() == 0
+
+
+def test_stage_a_vision_loss_uses_the_full_output_energy():
+    target = torch.ones(2, 4, 2, 3, requires_grad=True)
+    readout = torch.zeros_like(target, requires_grad=True)
+    positions = torch.tensor([[True, True, False, False], [False, False, False, False]])
+    energy = torch.tensor([0.5, 0.5])
+    loss = visual_transfer_loss(readout, target, positions, energy)
+    # The error is divided by the teacher's complete-output energy, never by the
+    # (smaller) vision-only energy; a sample without supervised positions is zero.
+    torch.testing.assert_close(loss[0], torch.tensor(1.0 / (0.5 + 1e-6)))
+    assert loss[1] == 0
+    loss.sum().backward()
+    assert target.grad is None
+    assert readout.grad[1].count_nonzero() == 0
+
+
+def test_visual_queries_are_the_first_text_positions_after_the_image():
+    valid = torch.ones(3, 6, dtype=torch.bool)
+    valid[1, 4:] = False
+    image = torch.tensor([[False, True, True, False, False, False],
+                          [False, False, False, False, False, False],
+                          [False, True, True, False, False, False]])
+    assert visual_queries(valid, image, limit=2).tolist() == [
+        [False, False, False, True, True, False],
+        [False, False, False, False, False, False],
+        [False, False, False, True, True, False]]
+    with pytest.raises(ValueError):
+        visual_queries(valid, image, limit=0)
 
 
 def test_trajectory_and_resume_do_not_restart_schedule():

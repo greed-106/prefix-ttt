@@ -60,13 +60,21 @@ def restore_rng(state):
         torch.cuda.set_rng_state(state['cuda'])
 
 
-def gather_rng(rank, world):
-    """One snapshot per rank, collected on rank 0 so a resume stays bit-exact."""
-    if world == 1:
-        return [rng_state()]
-    states = [None] * world if rank == 0 else None
-    dist.gather_object(rng_state(), states, dst=0)
-    return states
+def save_rng(path, rank):
+    """Write this rank's RNG sidecar next to a checkpoint.
+
+    Deliberately not a collective: a peer that is slow to reach the save point must
+    not be able to hang the checkpoint of an otherwise healthy run.
+    """
+    save_atomic(Path(f'{path}.rng-rank{rank}'), rng_state())
+
+
+def load_rng(path, rank):
+    """This rank's sidecar state, or None when it has none (keep the current RNG)."""
+    sidecar = Path(f'{path}.rng-rank{rank}')
+    if not sidecar.exists():
+        return None
+    return torch.load(sidecar, map_location='cpu', weights_only=False)
 
 
 def save_atomic(path, state):

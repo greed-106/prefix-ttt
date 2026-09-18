@@ -19,9 +19,15 @@ from prefix_ttt.model.generation import TransformersHybridCache
 
 FULL_ATTENTION_LAYERS = (0, 3, 7, 11, 15, 19, 23, 27, 31)
 
+# The anchor list is the whole layout switch: E2 keeps nine full-attention anchors and
+# gives every TTT layer a Local-32 block; P32 replaces all 32 layers and therefore has
+# no local path at all. Anything else is refused by config.load_config.
+LAYOUT_ANCHORS = {'E2': FULL_ATTENTION_LAYERS, 'P32': ()}
+
 
 class PrefixTTTAttention(nn.Module):
-    def __init__(self, original, *, backend, seed=SEED, tile_size=TILE_SIZE):
+    def __init__(self, original, *, backend, seed=SEED, tile_size=TILE_SIZE,
+                 use_local=True, readout_normalize=True):
         super().__init__()
         if backend not in ('reference', 'fla'):
             raise ValueError('Select reference or fla explicitly')
@@ -32,6 +38,7 @@ class PrefixTTTAttention(nn.Module):
         self.head_dim = original.head_dim
         self.heads = config.num_attention_heads
         self.backend, self.tile_size = backend, tile_size
+        self.use_local, self.readout_normalize = use_local, readout_normalize
         # Preserve exact module objects/names: PEFT whitelist remains valid.
         self.q_proj, self.k_proj = original.q_proj, original.k_proj
         self.v_proj, self.o_proj = original.v_proj, original.o_proj
@@ -71,17 +78,19 @@ class PrefixTTTAttention(nn.Module):
         dense_prefill = (caching and self.backend == 'fla' and old is None
                          and q.dtype == torch.bfloat16 and self.head_dim == 128
                          and past_key_value._dense_prefill)
+        local = final_local = None
         if caching:
             valid = past_key_value.current_valid
-            local_cache = None if old is None else LocalCache(old.key, old.value,
-                old.local_position, past_key_value.storage.seen_tokens)
-            if dense_prefill:
-                local, final_local = dense_local(q, k, v)
-            elif t == 1 and local_cache is not None:
-                local, final_local = local_attention_decode(q, k, v, valid, local_cache)
-            else:
-                local, final_local = local_attention_cached(q, k, v, valid, local_cache)
-        else:
+            if self.use_local:
+                local_cache = None if old is None else LocalCache(old.key, old.value,
+                    old.local_position, past_key_value.storage.seen_tokens)
+                if dense_prefill:
+                    local, final_local = dense_local(q, k, v)
+                elif t == 1 and local_cache is not None:
+                    local, final_local = local_attention_decode(q, k, v, valid, local_cache)
+                else:
+                    local, final_local = local_attention_cached(q, k, v, valid, local_cache)
+        elif self.use_local:
             local = local_attention(q, k, v, valid)
         # New parameters remain FP32 masters. Inference cannot rely on the
         # caller installing autocast around a BF16 base model's projections.
@@ -104,15 +113,20 @@ class PrefixTTTAttention(nn.Module):
                 tile_size=self.tile_size, need_final_state=caching)
         if caching:
             past_key_value.storage.set_layer(self.layer_idx, LayerState(state=state,
-                key=final_local.key, value=final_local.value, local_position=final_local.lengths))
+                key=None if final_local is None else final_local.key,
+                value=None if final_local is None else final_local.value,
+                local_position=None if final_local is None else final_local.lengths))
         with torch.autocast(device_type=q.device.type, dtype=amp_dtype, enabled=amp_enabled):
             if fused:
                 gate = torch.nn.functional.linear(hidden_states,
                     self.prefix_ttt.inference_weight('gate_weight', hidden_states))
-                combined = fused_readout(memory, gate, local, valid)
+                combined = fused_readout(memory, gate, local, valid,
+                                         normalize=self.readout_normalize,
+                                         has_local=self.use_local)
             else:
-                residual = self.prefix_ttt.readout(hidden_states, memory)
-                combined = (local + residual).masked_fill(~valid[..., None, None], 0)
+                combined = self.prefix_ttt.readout(hidden_states, memory, local=local,
+                                                   normalize=self.readout_normalize)
+                combined = combined.masked_fill(~valid[..., None, None], 0)
         output = self.o_proj(combined.reshape(b, t, -1))
         return output.masked_fill(~valid[..., None], 0), None
 
@@ -130,7 +144,9 @@ def install_prefix_ttt(model, *, backend, full_attention_layers=FULL_ATTENTION_L
     for index, layer in enumerate(layers):
         if index not in anchors:
             layer.self_attn = PrefixTTTAttention(layer.self_attn, backend=backend,
-                                                seed=seed, tile_size=tile_size)
+                                                seed=seed, tile_size=tile_size,
+                                                use_local=bool(anchors),
+                                                readout_normalize=bool(anchors))
             new_parameters.extend(layer.self_attn.prefix_ttt.parameters())
     model.config.use_cache = False
     model.config.prefix_ttt_layers = [i for i in range(len(layers)) if i not in anchors]

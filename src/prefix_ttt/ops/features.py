@@ -90,6 +90,13 @@ class FeatureReadout(nn.Module):
             outputs.append(silu_rms(a, b))
         return tuple(outputs)
 
-    def readout(self, x, memory):
+    def readout(self, x, memory, *, local=None, normalize=True):
+        """Signed per-head gate on the prefix read; ``normalize`` keeps the legacy form.
+
+        P32 (pure Prefix-TTT) passes ``normalize=False`` so the accumulated history
+        keeps its own magnitude, and ``local=None`` because no local path exists.
+        """
         gate = F.linear(x, self.inference_weight('gate_weight', x))
-        return gate.unsqueeze(-1) * rms_no_affine(memory)
+        value = rms_no_affine(memory) if normalize else memory
+        value = gate.unsqueeze(-1) * value
+        return value if local is None else value + local

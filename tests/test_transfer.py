@@ -3,6 +3,7 @@ from torch import nn
 
 from llava.model.language_model.llava_llama import LlavaConfig, LlavaLlamaForCausalLM
 from prefix_ttt.ops.features import FeatureReadout
+from prefix_ttt.training import visual_queries
 from prefix_ttt.transfer import TransferHooks
 
 
@@ -24,12 +25,16 @@ def test_transfer_preserves_teacher_and_only_trains_branches():
     hooks.valid = torch.ones_like(inputs, dtype=torch.bool)
     hooks.visual = hooks.valid.clone()
     hooks.visual[:, 12:] = False
+    hooks.positions = visual_queries(hooks.valid, hooks.visual)
     hooks.denominator = 1
     try:
         with torch.no_grad():
             actual = teacher.get_model()(inputs, use_cache=False).last_hidden_state
         torch.testing.assert_close(actual, expected, rtol=0, atol=0)
         assert all(p.grad is None for p in teacher.parameters())
+        # The re-derived attention call must reproduce the teacher's own output, or
+        # the vision-only target would use a different softmax than the teacher did.
+        assert float(hooks.consistency) == 0
         assert all(p.grad is not None and torch.isfinite(p.grad).all() and p.grad.abs().sum() > 0
                    for p in branches.parameters())
         assert not hooks.captured

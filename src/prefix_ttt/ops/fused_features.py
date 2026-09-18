@@ -71,32 +71,40 @@ def _readout_kernel(MEMORY, GATE, LOCAL, VALID, OUT,
                     L_B: tl.constexpr, L_T: tl.constexpr, L_H: tl.constexpr, L_D: tl.constexpr,
                     V_B: tl.constexpr, V_T: tl.constexpr,
                     T: tl.constexpr, H: tl.constexpr, D: tl.constexpr,
-                    BLOCK: tl.constexpr):
+                    NORMALIZE: tl.constexpr, HAS_LOCAL: tl.constexpr, BLOCK: tl.constexpr):
     row = tl.program_id(0)
     batch, token, head = row // (T * H), row // H % T, row % H
     dim = tl.arange(0, BLOCK)
     memory = tl.load(MEMORY + batch * M_B + token * M_T
                      + head * M_H + dim * M_D, dim < D, other=0).to(tl.float32)
-    inverse = libdevice.rsqrt(_mean_square_128(memory) + EPS)
-    normalized = (memory * inverse).to(MEMORY.dtype.element_ty).to(tl.float32)
+    if NORMALIZE:
+        inverse = libdevice.rsqrt(_mean_square_128(memory) + EPS)
+        memory = (memory * inverse).to(MEMORY.dtype.element_ty).to(tl.float32)
     gate = tl.load(GATE + batch * G_B + token * G_T + head * G_H).to(tl.float32)
-    residual = (gate * normalized).to(MEMORY.dtype.element_ty).to(tl.float32)
-    local = tl.load(LOCAL + batch * L_B + token * L_T
-                    + head * L_H + dim * L_D, dim < D, other=0).to(tl.float32)
+    residual = (gate * memory).to(MEMORY.dtype.element_ty).to(tl.float32)
+    if HAS_LOCAL:
+        local = tl.load(LOCAL + batch * L_B + token * L_T
+                        + head * L_H + dim * L_D, dim < D, other=0).to(tl.float32)
+        combined = (local + residual).to(OUT.dtype.element_ty)
+    else:
+        combined = residual.to(OUT.dtype.element_ty)
     valid = tl.load(VALID + batch * V_B + token * V_T)
-    combined = (local + residual).to(OUT.dtype.element_ty)
     tl.store(OUT + row * D + dim, tl.where(valid, combined, 0), dim < D)
 
 
-def readout(memory, gate, local, valid):
-    """Normalize memory and combine the signed gate with Local attention."""
+def readout(memory, gate, local, valid, *, normalize=True, has_local=True):
+    """Apply the signed gate to the prefix read, with or without a local path."""
     batch, tokens, heads, dim = memory.shape
+    pointer = local if has_local else memory
     if dim != 128 or batch * tokens * heads < 16:
-        return (local + gate[..., None] * rms_no_affine(memory)).masked_fill(
-            ~valid[..., None, None], 0)
-    out = torch.empty(local.shape, device=local.device, dtype=local.dtype)
+        value = rms_no_affine(memory) if normalize else memory
+        combined = gate[..., None] * value
+        if has_local:
+            combined = local + combined
+        return combined.masked_fill(~valid[..., None, None], 0)
+    out = torch.empty(pointer.shape, device=pointer.device, dtype=pointer.dtype)
     _readout_kernel[(batch * tokens * heads,)](
-        memory, gate, local, valid, out, *memory.stride(), *gate.stride(),
-        *local.stride(), *valid.stride(), tokens, heads, dim,
-        triton.next_power_of_2(dim), num_warps=4, enable_fp_fusion=False)
+        memory, gate, pointer, valid, out, *memory.stride(), *gate.stride(),
+        *pointer.stride(), *valid.stride(), tokens, heads, dim,
+        normalize, has_local, triton.next_power_of_2(dim), num_warps=4, enable_fp_fusion=False)
     return out

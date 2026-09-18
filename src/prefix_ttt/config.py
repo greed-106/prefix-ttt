@@ -14,15 +14,15 @@ from pathlib import Path
 from prefix_ttt.model.bridge import (IMAGE_ASPECT_RATIO, MAX_EXPANDED_LENGTH, PINNED_HEAD_DIM,
                                      PINNED_HEADS, PINNED_LAYERS)
 from prefix_ttt.model.generation import DO_SAMPLE, MAX_NEW_TOKENS, NUM_BEAMS
-from prefix_ttt.model.hybrid import FULL_ATTENTION_LAYERS
+from prefix_ttt.model.hybrid import LAYOUT_ANCHORS
 from prefix_ttt.model.trainability import (LORA_ALPHA, LORA_BIAS, LORA_DROPOUT, LORA_RANK,
                                            LORA_SEED)
 from prefix_ttt.ops import ETA, LOCAL_BLOCK_SIZE, TILE_SIZE
 from prefix_ttt.ops.features import RMS_EPS
 from prefix_ttt.runtime import SEED
 from prefix_ttt.training import (ADAM_BETAS, ADAM_EPS, BASE_LR, EFFECTIVE_BATCH_SIZE, GRAD_CLIP,
-                                 LORA_LR, MATRIX_WEIGHT_DECAY, NEW_MODULE_LR, PILOT_MIN_SAMPLES,
-                                 WARMUP_FRACTION)
+                                 KD_TEMPERATURE, KD_WEIGHT, LORA_LR, MATRIX_WEIGHT_DECAY,
+                                 NEW_MODULE_LR, PILOT_MIN_SAMPLES, WARMUP_FRACTION)
 from prefix_ttt.data_pipeline import CONV_TEMPLATE
 from prefix_ttt.manifests import A_STAGE_SAMPLES
 
@@ -64,6 +64,10 @@ def _mirrored(config):
     ]
     if 'base_lr' in training:
         rows.append(('training.base_lr', training['base_lr'], BASE_LR))
+    if 'kd_weight' in training:
+        rows.append(('training.kd_weight', training['kd_weight'], KD_WEIGHT))
+    if 'kd_temperature' in training:
+        rows.append(('training.kd_temperature', training['kd_temperature'], KD_TEMPERATURE))
     return rows
 
 
@@ -80,9 +84,10 @@ def load_config(path, *, require_base_lr=False):
         if recorded != implemented:
             raise ValueError(f'configs recipe mismatch at {key}: file={recorded!r} '
                              f'code={implemented!r}; update the file or the constant')
-    anchors = config['full_attention_layers']
-    if tuple(anchors) != tuple(FULL_ATTENTION_LAYERS):
-        raise ValueError('configs anchor layers differ from model.hybrid.FULL_ATTENTION_LAYERS')
+    anchors = tuple(config['full_attention_layers'])
+    if anchors not in LAYOUT_ANCHORS.values():
+        raise ValueError('configs anchor layers are not a supported layout: '
+                         f'{sorted(LAYOUT_ANCHORS)}')
     if set(config['candidate_ttt_layers']) | set(anchors) != set(range(PINNED_LAYERS)):
         raise ValueError('candidate_ttt_layers must cover every non-anchor layer')
     return config

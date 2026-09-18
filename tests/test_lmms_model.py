@@ -9,7 +9,7 @@ from llava.model.language_model.llava_llama import LlavaConfig, LlavaLlamaForCau
 from lmms_eval.models.simple.llava import Llava
 from lmms_eval.models import get_model
 from prefix_ttt import lmms_model
-from prefix_ttt.model.hybrid import install_prefix_ttt
+from prefix_ttt.model.hybrid import LAYOUT_ANCHORS, install_prefix_ttt
 from prefix_ttt.model.trainability import install_lora, merge_lora_weights
 
 
@@ -28,11 +28,13 @@ def test_official_generation_is_inherited():
     assert lmms_model.PrefixTTTLlava.loglikelihood is Llava.loglikelihood
 
 
-@pytest.mark.parametrize('layout', ['E0', 'E1', 'E2'])
+@pytest.mark.parametrize('layout', ['E0', 'E1', 'E2', 'P32'])
 def test_adapter_loading_and_trainable_restore(tmp_path, monkeypatch, layout):
     torch.manual_seed(42)
     template = tiny_base()
     base_state = template.state_dict()
+    anchors = () if layout == 'P32' else (0,)
+    seen = []
 
     def load(path, *, dtype):
         assert dtype == torch.bfloat16
@@ -42,9 +44,11 @@ def test_adapter_loading_and_trainable_restore(tmp_path, monkeypatch, layout):
             parameter.data = parameter.data.to(dtype)
         return model, {'missing': [], 'unexpected': []}
 
-    def install(model, *, backend):
+    def install(model, *, backend, full_attention_layers):
         assert backend == 'fla'
-        return install_prefix_ttt(model, backend='reference', full_attention_layers=[0])
+        seen.append(full_attention_layers)
+        return install_prefix_ttt(model, backend='reference',
+                                  full_attention_layers=anchors)
 
     monkeypatch.setattr(lmms_model, 'load_checkpoint', load)
     monkeypatch.setattr(lmms_model, 'load_tokenizer', lambda path: 'tokenizer')
@@ -55,7 +59,7 @@ def test_adapter_loading_and_trainable_restore(tmp_path, monkeypatch, layout):
     expected = {}
     if layout != 'E0':
         model, _ = load(tmp_path, dtype=torch.bfloat16)
-        new = install(model, backend='fla') if layout == 'E2' else []
+        new = install(model, backend='fla', full_attention_layers=anchors) if layout != 'E1' else []
         model = install_lora(model, new_parameters=new)
         with torch.no_grad():
             for parameter in model.parameters():
@@ -70,6 +74,9 @@ def test_adapter_loading_and_trainable_restore(tmp_path, monkeypatch, layout):
                         trainable=trainable), checkpoint)
     adapter = lmms_model.PrefixTTTLlava(pretrained=str(tmp_path),
                                        checkpoint=checkpoint, device='cpu')
+    if layout in ('E2', 'P32'):
+        # The adapter must install the anchors the checkpoint's layout declares.
+        assert seen[-1] == LAYOUT_ANCHORS[layout]
     assert adapter.model is adapter._model
     assert adapter._model.model.rotary_emb.inv_freq.dtype == torch.float32
     assert adapter.use_cache and not adapter._model.training

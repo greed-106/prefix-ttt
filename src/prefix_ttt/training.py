@@ -22,6 +22,10 @@ ADAM_BETAS = (0.9, 0.95)
 ADAM_EPS = 1e-8
 ENERGY_EPS = 1e-6            # guards the normalised transfer diagnostic
 PILOT_MIN_SAMPLES = 50_000   # the pilot split of the fixed trajectory
+VISUAL_QUERY_LIMIT = 64      # supervised text queries after the image, per sample
+TEACHER_CHECK_TOLERANCE = 0.05   # max relative gap when re-deriving the teacher's attention
+KD_WEIGHT = 1.0              # phase B: weight of the frozen teacher's KL term
+KD_TEMPERATURE = 1.0         # phase B: distillation temperature (tau), no annealing
 
 
 def accumulation_steps(world_size, micro_batch_size, effective_batch_size=EFFECTIVE_BATCH_SIZE):
@@ -49,19 +53,21 @@ with zero targets contributes differentiable zero; an empty group is an error.
     return summed * world_size / global_target_count
 
 
-def residual_transfer_loss(readout, full, local, visual, valid):
+def full_attention_transfer_loss(readout, target, visual, valid):
     """Per-sample A loss for ONE layer, before o_proj; caller sums layers.
 
-Returning per-sample values permits exact normalization by actual global
-sample count, including the final short accumulation group.
+P32 keeps no local branch, so the branch must reproduce the teacher's complete
+attention output. Visual and text queries are scored separately, each against the
+teacher's own energy on that modality, so a text majority cannot hide a visual
+error. Per-sample values permit exact normalization by the actual global sample
+count, including the final short accumulation group.
     """
     if visual.dtype != torch.bool or valid.dtype != torch.bool or visual.shape != valid.shape:
         raise ValueError("visual and valid must be boolean [B,T]")
     if (visual & ~valid).any() or not valid.any(dim=1).all():
         raise ValueError("invalid modality masks or empty sample")
-    target = (full - local).detach().float()
-    error = (readout.float() - target).square().mean(dim=(-1, -2))
-    energy = full.detach().float().square().mean(dim=(-1, -2))
+    error = (readout.float() - target.detach().float()).square().mean(dim=(-1, -2))
+    energy = target.detach().float().square().mean(dim=(-1, -2))
     result = error.new_zeros(error.shape[0])
     modalities = error.new_zeros(error.shape[0])
     for mask in (visual & valid, ~visual & valid):
@@ -69,10 +75,68 @@ sample count, including the final short accumulation group.
         active = count > 0
         denom = count.clamp_min(1)
         numerator = (error * mask).sum(dim=1) / denom
-        norm = (energy * mask).sum(dim=1) / denom + 1e-6
+        norm = (energy * mask).sum(dim=1) / denom + ENERGY_EPS
         result = result + torch.where(active, numerator / norm, 0)
         modalities = modalities + active
     return result / modalities
+
+
+def visual_transfer_loss(readout_visual, target_visual, positions, energy):
+    """Per-sample A vision loss for ONE layer, before o_proj.
+
+``positions`` selects the supervised text queries, ``energy`` is the teacher's
+complete-output per-token energy averaged over the sample's valid tokens. That one
+denominator is shared with the full-output term, so a small vision contribution is
+never rescaled into a large relative error.
+    """
+    if positions.dtype != torch.bool or positions.ndim != 2:
+        raise ValueError("positions must be boolean [B,T]")
+    error = (readout_visual.float() - target_visual.detach().float()).square().mean(dim=(-1, -2))
+    count = positions.sum(dim=1)
+    active = count > 0
+    denom = count.clamp_min(1)
+    return torch.where(active, (error * positions).sum(dim=1) / denom / (energy + ENERGY_EPS), 0)
+
+
+def visual_queries(valid, image_token_mask, limit=VISUAL_QUERY_LIMIT):
+    """First ``limit`` text queries after the complete image, per sample.
+
+Label-side only: no token is added and no question is changed. Samples without an
+image are excluded because their vision contribution is identically zero; the
+expansion refuses multi-image samples upstream, so "the image" is unambiguous.
+    """
+    if valid.dtype != torch.bool or valid.shape != image_token_mask.shape:
+        raise ValueError("valid and image_token_mask must be boolean [B,T]")
+    if limit <= 0:
+        raise ValueError("limit must be positive")
+    index = torch.arange(valid.shape[1], device=valid.device)[None].expand_as(valid)
+    last_image = index.masked_fill(~image_token_mask, -1).max(dim=1).values
+    selected = valid & ~image_token_mask & (index > last_image[:, None])
+    order = selected.long().cumsum(dim=1)
+    return selected & (order <= limit) & (last_image >= 0)[:, None]
+
+
+def kd_loss(student_logits, teacher_logits, labels, global_target_count,
+            temperature=KD_TEMPERATURE):
+    """Teacher-to-student KL on the same shifted assistant positions as the CE.
+
+The frozen teacher supplies a target distribution only: no hidden state crosses the
+boundary and no alternative answer is generated. Each rank contributes its own token
+sum divided by the GLOBAL target count, exactly like the :func:`token_normalized_ce`
+call site in the manual-sum training loop; the gradient reduction is a plain sum, so
+no world-size factor may be applied here.
+    """
+    if global_target_count <= 0 or temperature <= 0:
+        raise ValueError("invalid KD normalization or temperature")
+    if student_logits.shape != teacher_logits.shape:
+        raise ValueError("student and teacher logits must have the same shape")
+    if tuple(labels.shape) != tuple(student_logits.shape[:2]):
+        raise ValueError("labels must align with the logits' batch and sequence")
+    student = F.log_softmax(student_logits[..., :-1, :].float() / temperature, dim=-1)
+    teacher = F.log_softmax(teacher_logits[..., :-1, :].float() / temperature, dim=-1)
+    per_token = F.kl_div(student, teacher, reduction="none", log_target=True).sum(-1)
+    mask = labels[..., 1:].ne(IGNORE_INDEX)
+    return per_token.masked_fill(~mask, 0).sum() / global_target_count * temperature ** 2
 
 
 def trajectory(train_samples, effective_batch_size=EFFECTIVE_BATCH_SIZE,

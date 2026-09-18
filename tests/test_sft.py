@@ -3,7 +3,34 @@ import pytest
 
 
 from prefix_ttt.runtime import load_trainable, restore_rng, rng_state
-from prefix_ttt.training import cosine_factor, token_normalized_ce
+from prefix_ttt.training import cosine_factor, kd_loss, token_normalized_ce
+
+
+def test_kd_is_forward_kl_on_shifted_targets_with_one_scale():
+    torch.manual_seed(7)
+    student = torch.randn(2, 5, 7, requires_grad=True)
+    teacher = torch.randn(2, 5, 7)
+    labels = torch.randint(0, 7, (2, 5))
+    labels[0, :2] = -100
+    labels[1, -1] = -100
+    targets = int(labels[:, 1:].ne(-100).sum())
+    actual = kd_loss(student, teacher, labels, targets)
+    student_log = torch.log_softmax(student[:, :-1].float(), dim=-1)
+    teacher_log = torch.log_softmax(teacher[:, :-1].float(), dim=-1)
+    mask = labels[:, 1:].ne(-100)
+    expected = ((teacher_log.exp() * (teacher_log - student_log)).sum(-1) * mask).sum() / targets
+    torch.testing.assert_close(actual, expected)
+    # Manual-sum reduction: the caller must NOT scale by world size, so the rank
+    # contributions add up to exactly this value.
+    # The temperature enters exactly as tau**2 * KL(logits / tau).
+    warm = kd_loss(student, teacher, labels, targets, temperature=2.0)
+    student_warm = torch.log_softmax(student[:, :-1].float() / 2, dim=-1)
+    teacher_warm = torch.log_softmax(teacher[:, :-1].float() / 2, dim=-1)
+    expected_warm = (((teacher_warm.exp() * (teacher_warm - student_warm)).sum(-1) * mask).sum()
+                     / targets * 4)
+    torch.testing.assert_close(warm, expected_warm)
+    actual.backward()
+    assert student.grad is not None and teacher.grad is None
 
 
 def test_summed_rank_gradients_equal_global_token_mean():

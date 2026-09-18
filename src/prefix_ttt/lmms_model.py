@@ -12,7 +12,7 @@ from lmms_eval.models.simple.llava import Llava
 
 from prefix_ttt.instrument import ForwardMeter, append_record
 from prefix_ttt.model.bridge import load_checkpoint, load_tokenizer
-from prefix_ttt.model.hybrid import install_prefix_ttt
+from prefix_ttt.model.hybrid import LAYOUT_ANCHORS, install_prefix_ttt
 from prefix_ttt.model.trainability import install_lora, merge_lora_weights
 from prefix_ttt.runtime import load_trainable
 from prefix_ttt.ops.features import FeatureReadout
@@ -49,18 +49,21 @@ class PrefixTTTLlava(Llava):
         self._image_processor = model.get_vision_tower().image_processor
         if checkpoint is not None:
             state = torch.load(checkpoint, map_location='cpu', weights_only=False)
-            if (state.get('stage') != 'B' or state.get('layout') not in ('E1', 'E2')
+            if (state.get('stage') != 'B' or state.get('layout') not in ('E1', 'E2', 'P32')
                     or state.get('diagnostic_only', False)):
-                raise ValueError('Expected a non-debug E1/E2 phase-B checkpoint')
+                raise ValueError('Expected a non-debug E1/E2/P32 phase-B checkpoint')
+            ttt_layout = state.get('layout') in ('E2', 'P32')
             if state.get('trainable_mode') == 'full':
                 # Full fine-tuning carries the base weights itself, so there is no
                 # adapter to fold: the stored weights are already the served model.
-                if state['layout'] == 'E2':
-                    install_prefix_ttt(model, backend='fla')
+                if ttt_layout:
+                    install_prefix_ttt(model, backend='fla',
+                                       full_attention_layers=LAYOUT_ANCHORS[state['layout']])
                 model.load_state_dict(state['trainable'], strict=True)
             else:
-                new_parameters = (install_prefix_ttt(model, backend='fla')
-                                  if state['layout'] == 'E2' else [])
+                new_parameters = (install_prefix_ttt(model, backend='fla',
+                                                     full_attention_layers=LAYOUT_ANCHORS[state['layout']])
+                                  if ttt_layout else [])
                 model = install_lora(model, new_parameters=new_parameters)
                 load_trainable(model, state['trainable'])
                 # Inference always serves the folded weights: two matmuls per projection
