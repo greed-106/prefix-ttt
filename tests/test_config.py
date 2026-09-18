@@ -40,12 +40,14 @@ def test_pure_ttt_recipe_declares_every_layer_and_distillation():
     assert config['candidate_ttt_layers'] == list(range(32))
     assert config['training']['kd_weight'] == 1.0
     assert config['training']['kd_temperature'] == 1.0
+    assert config['training']['stage_a_passes'] == 3
 
 
-def test_pure_ttt_recipe_is_checked_against_the_code(tmp_path):
+@pytest.mark.parametrize('key, value', [('kd_weight', 0.5), ('stage_a_passes', 2)])
+def test_pure_ttt_recipe_is_checked_against_the_code(tmp_path, key, value):
     config = json.loads(Path('configs/p32.json').read_text())
-    config['training']['kd_weight'] = 0.5
+    config['training'][key] = value
     path = tmp_path / 'p32.json'
     path.write_text(json.dumps(config))
-    with pytest.raises(ValueError, match='kd_weight'):
+    with pytest.raises(ValueError, match=key):
         load_config(path)

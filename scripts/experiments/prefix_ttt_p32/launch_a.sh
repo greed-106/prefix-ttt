@@ -22,4 +22,4 @@ exec "$REPO/scripts/experiments/prefix_ttt_h100/run_multinode.sh" "${NODE_RANK:-
   --config configs/p32.json \
   --manifest artifacts/cpu/fixed_manifest.json \
   --output "${OUT:-/data/shared/weights/prefix-ttt/training/A-P32}" \
-  --save-every 25 "$@"
+  --save-every 100 "$@"

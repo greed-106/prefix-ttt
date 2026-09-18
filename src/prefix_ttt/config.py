@@ -20,9 +20,10 @@ from prefix_ttt.model.trainability import (LORA_ALPHA, LORA_BIAS, LORA_DROPOUT, 
 from prefix_ttt.ops import ETA, LOCAL_BLOCK_SIZE, TILE_SIZE
 from prefix_ttt.ops.features import RMS_EPS
 from prefix_ttt.runtime import SEED
-from prefix_ttt.training import (ADAM_BETAS, ADAM_EPS, BASE_LR, EFFECTIVE_BATCH_SIZE, GRAD_CLIP,
-                                 KD_TEMPERATURE, KD_WEIGHT, LORA_LR, MATRIX_WEIGHT_DECAY,
-                                 NEW_MODULE_LR, PILOT_MIN_SAMPLES, WARMUP_FRACTION)
+from prefix_ttt.training import (ADAM_BETAS, ADAM_EPS, A_STAGE_PASSES, BASE_LR, EFFECTIVE_BATCH_SIZE,
+                                 GRAD_CLIP, KD_TEMPERATURE, KD_WEIGHT, LORA_LR,
+                                 MATRIX_WEIGHT_DECAY, NEW_MODULE_LR, PILOT_MIN_SAMPLES,
+                                 WARMUP_FRACTION)
 from prefix_ttt.data_pipeline import CONV_TEMPLATE
 from prefix_ttt.manifests import A_STAGE_SAMPLES
 
@@ -64,6 +65,8 @@ def _mirrored(config):
     ]
     if 'base_lr' in training:
         rows.append(('training.base_lr', training['base_lr'], BASE_LR))
+    if 'stage_a_passes' in training:
+        rows.append(('training.stage_a_passes', training['stage_a_passes'], A_STAGE_PASSES))
     if 'kd_weight' in training:
         rows.append(('training.kd_weight', training['kd_weight'], KD_WEIGHT))
     if 'kd_temperature' in training:

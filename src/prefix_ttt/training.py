@@ -24,6 +24,7 @@ ENERGY_EPS = 1e-6            # guards the normalised transfer diagnostic
 PILOT_MIN_SAMPLES = 50_000   # the pilot split of the fixed trajectory
 VISUAL_QUERY_LIMIT = 64      # supervised text queries after the image, per sample
 TEACHER_CHECK_TOLERANCE = 0.05   # max relative gap when re-deriving the teacher's attention
+A_STAGE_PASSES = 3           # phase A: passes over the fixed 50k subset
 KD_WEIGHT = 1.0              # phase B: weight of the frozen teacher's KL term
 KD_TEMPERATURE = 1.0         # phase B: distillation temperature (tau), no annealing
 

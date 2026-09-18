@@ -169,7 +169,12 @@ def main():
     try:
         seed_everything(SEED)
         manifest, sha = load_manifest(args.manifest, config['data_root'])
-        total_steps = math.ceil(len(manifest['A']) / EFFECTIVE_BATCH_SIZE)
+        # Phase A may revisit the audited 50k subset more than once: the per-layer
+        # regression had not converged after a single pass, and repeating an
+        # audited split is exact (every A sample is inside B's training set anyway).
+        passes = int(config['training']['stage_a_passes'])
+        order = manifest['A'] * passes
+        total_steps = math.ceil(len(order) / EFFECTIVE_BATCH_SIZE)
         identity = dict(stage='A', objective='full_attention+visual', manifest_sha256=sha,
                         config_sha256=digest_json(config), total_steps=total_steps,
                         diagnostic_only=args.max_steps is not None)
@@ -198,7 +203,7 @@ def main():
             optimizer.load_state_dict(checkpoint['optimizer'])
             scheduler.load_state_dict(checkpoint['scheduler'])
             cursor, step = checkpoint['samples_seen'], checkpoint['global_step']
-            if cursor != min(step * EFFECTIVE_BATCH_SIZE, len(manifest['A'])):
+            if cursor != min(step * EFFECTIVE_BATCH_SIZE, len(order)):
                 raise ValueError('Invalid phase-A cursor')
             rng = load_rng(args.resume, rank)
             if rng is None:
@@ -215,7 +220,8 @@ def main():
             save_rng(output / LATEST, rank)
             if rank == 0:
                 save_atomic(output / LATEST, {
-                    **identity, 'world_size': world, 'complete': cursor == len(manifest['A']),
+                    **identity, 'world_size': world, 'complete': cursor == len(order),
+                    'passes': passes,
                     'global_step': step, 'samples_seen': cursor,
                     'features': {key: {name: p.detach().cpu() for name, p in branch.state_dict().items()}
                                  for key, branch in branches.items()},
@@ -224,15 +230,15 @@ def main():
                 dist.barrier()
 
         stop = min(total_steps, args.max_steps) if args.max_steps is not None else total_steps
-        index_batches = [batch for start in range(cursor, len(manifest['A']), EFFECTIVE_BATCH_SIZE)
-                         for batch in micro_batches(manifest['A'], start, rank, world, micro)]
+        index_batches = [batch for start in range(cursor, len(order), EFFECTIVE_BATCH_SIZE)
+                         for batch in micro_batches(order, start, rank, world, micro)]
         stream = iter(batch_loader(dataset, collate, index_batches,
                                    int(config['training'].get('dataloader_workers', 0))))
         while step < stop:
             started = time.perf_counter()
             torch.cuda.reset_peak_memory_stats()
             optimizer.zero_grad(set_to_none=True)
-            hooks.denominator = min(EFFECTIVE_BATCH_SIZE, len(manifest['A']) - cursor)
+            hooks.denominator = min(EFFECTIVE_BATCH_SIZE, len(order) - cursor)
             hooks.diagnostics.clear()
             for batch in [next(stream) for _ in range(batches_per_step)]:
                 staged, metadata = prepare_sample(teacher, batch, device)
@@ -286,7 +292,7 @@ def main():
             if step == 1 or step % args.save_every == 0 or step == stop:
                 save()
         if rank == 0:
-            (output / 'result.json').write_text(json.dumps({**identity, 'world_size': world, 'complete': cursor == len(manifest['A']),
+            (output / 'result.json').write_text(json.dumps({**identity, 'world_size': world, 'passes': passes, 'complete': cursor == len(order),
                 'samples_seen': cursor, 'global_step': step}, indent=2))
     finally:
         if hooks:

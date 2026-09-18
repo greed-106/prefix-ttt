@@ -90,8 +90,8 @@ def main():
             if (stage_a.get('stage') != 'A' or not stage_a.get('complete')
                     or stage_a.get('diagnostic_only', False) or stage_a.get('manifest_sha256') != manifest_sha
                     or stage_a.get('config_sha256') != identity['config_sha256']
-                    or stage_a.get('samples_seen') != len(manifest['A'])
-                    or stage_a.get('global_step') != math.ceil(len(manifest['A']) / EFFECTIVE_BATCH_SIZE)):
+                    or stage_a.get('samples_seen') != len(manifest['A']) * int(config['training']['stage_a_passes'])
+                    or stage_a.get('global_step') != math.ceil(len(manifest['A']) * int(config['training']['stage_a_passes']) / EFFECTIVE_BATCH_SIZE)):
                 raise ValueError('Phase A checkpoint is incomplete or uses a different manifest')
             installed = {str(index) for index, layer in enumerate(model.model.layers)
                          if hasattr(layer.self_attn, 'prefix_ttt')}
