@@ -2,15 +2,23 @@
 # Run with sudo on every compute node. The node that exports the share keeps
 # using its local directory; every other node mounts the same path over NFS, so
 # the training command looks identical on every node. Idempotent.
+#
+#   sudo bash nfs-client-setup.sh
+#   sudo SERVER=h100-3 SHARE=/data/shared/weights/prefix-ttt bash nfs-client-setup.sh
+#
+# PERSIST=1 (default) also records the mount in /etc/fstab with _netdev, so a
+# rebooted node cannot silently write checkpoints into a local directory; set
+# PERSIST=0 to mount for this boot only.
 set -euo pipefail
 
-SERVER=h100-3
-SHARE=/data/shared/weights/prefix-ttt
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SERVER=${SERVER:-h100-3}
+SHARE=${SHARE:-/data/shared/weights/prefix-ttt}
+PERSIST=${PERSIST:-1}
 SOURCE="$SERVER:$SHARE"
 
 # Every machine gets the same name -> address mapping.
-grep -qw h100-3 /etc/hosts || echo "172.18.1.184  cucloud-server3 h100-3" >> /etc/hosts
-grep -qw h100-1 /etc/hosts || echo "172.18.1.156  cucloud-server1 h100-1" >> /etc/hosts
+bash "$SCRIPT_DIR/cluster-hosts.sh"
 
 exports_here() {
     command -v exportfs >/dev/null && exportfs -s 2>/dev/null | grep -qF "$SHARE"
@@ -35,6 +43,15 @@ else
     mkdir -p "$SHARE"
     mount -t nfs "$SOURCE" "$SHARE"
     echo "mounted $SOURCE at $SHARE"
+    if [ "$PERSIST" = 1 ]; then
+        LINE="$SOURCE $SHARE nfs defaults,_netdev 0 0"
+        if grep -qF "$SOURCE $SHARE" /etc/fstab; then
+            echo "present: fstab entry"
+        else
+            echo "$LINE" >>/etc/fstab
+            echo "added:   fstab entry ($LINE)"
+        fi
+    fi
 fi
 
 findmnt -T "$SHARE"
