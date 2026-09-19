@@ -618,3 +618,16 @@
   E2（合并口径）MME 1429.4893 / 278.2143、POPE 0.8501 / 0.8357；E2 成本 prefill 78.9 ms、
   TPOT 34.7 ms、峰值 13.51 GiB、缓存 147.8 MiB。
 - 本阶段未修改任何代码、未启动任何 GPU 任务。本机 8 卡与 h100-1 8 卡在 2026-09-12 01:30 均空闲。
+
+## 2026-09-19 多机能力回迁到 h100 分支（full-ttt → h100）
+
+- 目标：把 `full-ttt` 分支上修好的多节点通信问题与"三台主机一键配置 NFS + Hosts"脚本搬回 `h100` 分支，供后续多机训练使用。本次未启动任何 GPU 任务、未评测、未改动训练数学。
+- 已回迁（`h100` 现比 `origin/h100` 多 8 个本地 commit；`origin/h100` 仍为 `60be803`，未推送）：
+  - 直接 cherry-pick 4 个脚本提交（`1657fab`、`65061cb`、`36a97fe`、`75f654b`）：新增 `scripts/experiments/prefix_ttt_h100/cluster-hosts.sh` 作为三机名字映射的唯一来源，`nfs-server-export.sh`/`nfs-client-setup.sh` 改为 `SERVER`/`SHARE`/`CLIENTS`/`PERSIST` 参数化且幂等，客户端把挂载写进 `/etc/fstab`（`_netdev`）避免重启后静默写本地盘，README 增补新节点配置流程。
+  - cherry-pick `0b6dbf3`：`run_multinode.sh` 支持 elastic rendezvous（`elastic` 作为节点参数），各节点 GPU 数可以不同，静态模式行为不变。
+  - 手工移植 `f04d2ef`：`training.all_reduce_gradients` 按 (dtype, device) 分桶归约，替换 SFT 循环里逐张量 `all_reduce` + `isfinite` 同步；未移植该提交里 p32 supervisor 程序的两行改动（该文件在 h100 上由 `7adde0d` 删除）。
+  - 手工移植 `6bfa6ac` 的 RNG 部分：`runtime.save_rng/load_rng` 取代集合式 `gather_rng`，保存路径不再需要集合通信，慢节点或异常节点无法再挂住别人的 checkpoint；`sft.py`/`transfer.py` 恢复时先读 sidecar，读不到再回退旧 checkpoint 的 `rng_by_rank` 载荷，因此既有 checkpoint（如 `E2/latest.pt`，实测 16 份 `rng_by_rank`）仍逐 rank 精确恢复。这两处手工移植各带一个新增/扩展的 CPU 测试。
+- 未回迁：P32 模型改造（`6bfa6ac` 主体）、`47e70d2`/`d8af8c2` 的 p32 实验改动、`configs/p32.json` 与 `docs/experiments/2026-09-17-prefix-ttt-p32/` 账本；这些仍只在 `full-ttt` 上。
+- 验证：4 个脚本与 `README.md` 相对 `full-ttt` 逐字节相同（SHA256 比对），`runtime.py` 与 `full-ttt` 相同；`cluster-hosts.sh` 在合成 hosts 文件上验证"长名已在、短名缺失仍会写入"（原 bug）与二次运行幂等，在 `/etc/hosts` 副本上验证三机条目齐全时报 present；`run_multinode.sh` 的 elastic/static 两条分支用 stub `uv` 打印实参核对；`tests/test_gradient_reduction.py`（2 rank gloo）通过；全量 CPU 套件 201 passed / 84 GPU deselected；6 个 Shell 脚本 `bash -n` 通过。NFS 挂载与真实多机 rendezvous 未在本机执行（需要 root 与三台主机同时在线）。
+- AGENTS.md 改为只承载跨实验长期规范：新增"持久化托管一律用 Supervisor，主机缺该程序时用 `pixi global install supervisor` 安装"与"除跨主机同步代码外不得自行 commit"；把 2026-09-17 的"decode 优先、GPU 资源授权"这类单轮目标移出本文件，原文仍完整保留在 `docs/experiments/2026-09-11-prefix-ttt-kernel/ledger.md` 的 2026-09-17 各节；"不使用 CUDA Graph"按用户当轮要求同样从本文件删除，该约束现只作为那一轮的范围记录留在 kernel 账本中；并新增一条"单轮实验目标写在该实验目录"的元规则。
+- 推送：用户于 2026-09-19 当轮明确授权推送 `h100`。推送前核对本地与 `origin/h100` 无分叉（远端为 `60be803`），使用普通快进推送，未使用 `--force`、未改写远端历史；`origin/h100` 前移到本轮 8 个多机回迁提交的头部。
