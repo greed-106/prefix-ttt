@@ -13,8 +13,9 @@ from prefix_ttt.config import load_config
 from prefix_ttt.data_pipeline import (load_manifest, build_dataset, prepare_sample,
                                       micro_batches, batch_loader)
 from prefix_ttt.digests import digest_file, digest_json
-from prefix_ttt.runtime import (LATEST, PILOT, SEED, distributed_context, gather_rng,
-                                load_trainable, restore_rng, save_atomic, seed_everything, to_cpu)
+from prefix_ttt.runtime import (LATEST, PILOT, SEED, distributed_context, load_rng,
+                                load_trainable, restore_rng, save_atomic, save_rng,
+                                seed_everything, to_cpu)
 from prefix_ttt.model.bridge import load_checkpoint, load_tokenizer
 from prefix_ttt.model.hybrid import install_prefix_ttt
 from prefix_ttt.model.labels import IGNORE_INDEX
@@ -153,9 +154,16 @@ def main():
             if checkpoint.get('world_size') != world:
                 print(f'Resuming across world_size {checkpoint.get("world_size")} -> {world}; '
                       f'ranks without a stored state keep their initial RNG', flush=True)
-            states = checkpoint['rng_by_rank']
-            if rank < len(states):
-                restore_rng(states[rank])
+            # Per-rank sidecar first; checkpoints written before it carry the
+            # gathered states in the payload, so an old file still resumes exactly.
+            rng = load_rng(args.resume, rank)
+            if rng is None:
+                states = checkpoint.get('rng_by_rank', [])
+                rng = states[rank] if rank < len(states) else None
+            if rng is None:
+                print(f'No RNG state for rank {rank}; keeping the initial RNG', flush=True)
+            else:
+                restore_rng(rng)
             del checkpoint
         if rank == 0:
             (output / 'trainable_params.json').write_text(json.dumps(
@@ -175,10 +183,10 @@ def main():
             return {n: p.detach().cpu() for n, p in model.named_parameters()}
 
         def save(name, complete=False, optimizer_shards=False):
-            states = gather_rng(rank, world)
+            save_rng(output / name, rank)
             if rank == 0:
                 state = {**identity, 'world_size': world, 'complete': complete, 'global_step': step,
-                         'samples_seen': cursor, 'rng_by_rank': states,
+                         'samples_seen': cursor,
                          'trainable': trainable_state(),
                          'scheduler': ([s.state_dict() for s in schedulers] if full
                                        else scheduler.state_dict())}

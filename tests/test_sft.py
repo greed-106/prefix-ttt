@@ -18,6 +18,23 @@ def test_summed_rank_gradients_equal_global_token_mean():
     torch.testing.assert_close(actual, expected)
 
 
+def test_rng_sidecar_round_trip_and_missing_file(tmp_path):
+    from prefix_ttt.runtime import load_rng, save_rng
+    checkpoint = tmp_path / 'latest.pt'
+    torch.manual_seed(1234)
+    expected = rng_state()
+    save_rng(checkpoint, 3)
+    assert (tmp_path / 'latest.pt.rng-rank3').exists()
+    # A rank with no sidecar gets None; the resume path falls back to the payload
+    # written before sidecars existed, or keeps the initial RNG.
+    assert load_rng(checkpoint, 4) is None
+    torch.manual_seed(99)
+    restore_rng(load_rng(checkpoint, 3))
+    restored = rng_state()
+    assert torch.equal(restored['torch'], expected['torch'])
+    assert restored['python'] == expected['python']
+
+
 def test_resume_rng_optimizer_and_full_schedule():
     import copy
     import random

@@ -14,8 +14,8 @@ from prefix_ttt.config import load_config
 from prefix_ttt.data_pipeline import (load_manifest, build_dataset, prepare_sample,
                                       micro_batches, batch_loader)
 from prefix_ttt.digests import digest_json
-from prefix_ttt.runtime import (LATEST, SEED, distributed_context, gather_rng,
-                                restore_rng, save_atomic, seed_everything)
+from prefix_ttt.runtime import (LATEST, SEED, distributed_context, load_rng, restore_rng,
+                                save_atomic, save_rng, seed_everything)
 from prefix_ttt.model.bridge import load_checkpoint, load_tokenizer
 from prefix_ttt.ops.features import FeatureReadout
 from prefix_ttt.ops.fla import fla_prefix
@@ -153,18 +153,27 @@ def main():
             cursor, step = checkpoint['samples_seen'], checkpoint['global_step']
             if cursor != min(step * EFFECTIVE_BATCH_SIZE, len(manifest['A'])):
                 raise ValueError('Invalid phase-A cursor')
-            restore_rng(checkpoint['rng_by_rank'][rank])
+            # Per-rank sidecar first; checkpoints written before it carry the
+            # gathered states in the payload, so an old file still resumes exactly.
+            rng = load_rng(args.resume, rank)
+            if rng is None:
+                states = checkpoint.get('rng_by_rank', [])
+                rng = states[rank] if rank < len(states) else None
+            if rng is None:
+                print(f'No RNG state for rank {rank}; keeping the initial RNG', flush=True)
+            else:
+                restore_rng(rng)
             del checkpoint
         hooks = TransferHooks(teacher, branches)
         if rank == 0:
             (output / 'run.json').write_text(json.dumps({**identity, 'world_size': world, 'argv': vars(args), 'config': config}, indent=2))
 
         def save():
-            states = gather_rng(rank, world)
+            save_rng(output / LATEST, rank)
             if rank == 0:
                 save_atomic(output / LATEST, {
                     **identity, 'world_size': world, 'complete': cursor == len(manifest['A']),
-                    'global_step': step, 'samples_seen': cursor, 'rng_by_rank': states,
+                    'global_step': step, 'samples_seen': cursor,
                     'features': {key: {name: p.detach().cpu() for name, p in branch.state_dict().items()}
                                  for key, branch in branches.items()},
                     'optimizer': optimizer.state_dict(), 'scheduler': scheduler.state_dict()})
